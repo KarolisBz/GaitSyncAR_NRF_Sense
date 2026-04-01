@@ -23,9 +23,9 @@ static const struct device *gpio0    = DEVICE_DT_GET(DT_NODELABEL(gpio0));
 static const struct device *adc_dev  = DEVICE_DT_GET(DT_NODELABEL(adc));
 static struct bt_conn *active_conn   = NULL;
 
-// ─── BLE ──────────────────────────────────────────────────────────────────────
+// ─── BLE Advertising Data ─────────────────────────────────────────────────────
 
-/// PRIMARY PACKET
+// PRIMARY PACKET
 static const struct bt_data ad[] = {
     BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
     BT_DATA_BYTES(BT_DATA_UUID128_ALL, BT_UUID_NUS_VAL),
@@ -41,6 +41,8 @@ static const struct bt_le_adv_param adv_param = {
     .interval_min = BT_GAP_ADV_FAST_INT_MIN_2,
     .interval_max = BT_GAP_ADV_FAST_INT_MAX_2,
 };
+
+// ─── BLE Callbacks ────────────────────────────────────────────────────────────
 
 static void on_connected(struct bt_conn *conn, uint8_t err)
 {
@@ -66,26 +68,26 @@ BT_CONN_CB_DEFINE(conn_callbacks) = {
     .disconnected = on_disconnected,
 };
 
-// ─── ADC ──────────────────────────────────────────────────────────────────────
+// ─── ADC Configuration ────────────────────────────────────────────────────────
 
 static const struct adc_channel_cfg adc_cfg = {
     .gain             = ADC_GAIN_1_6,
     .reference        = ADC_REF_INTERNAL,
-    .acquisition_time = ADC_ACQ_TIME_DEFAULT,
+    // 40 microsecond shutter speed allows the 1M ohm resistors to fill the capacitor
+    .acquisition_time = ADC_ACQ_TIME(ADC_ACQ_TIME_MICROSECONDS, 40), 
     .channel_id       = ADC_CHANNEL,
-#if defined(CONFIG_ADC_CONFIGURABLE_INPUTS)
-    .input_positive   = SAADC_CH_PSELP_PSELP_AnalogInput1,
-#endif
+    .input_positive   = SAADC_CH_PSELP_PSELP_AnalogInput1, 
 };
 
 static float read_battery_voltage(void)
 {
     int16_t raw = 0;
     struct adc_sequence seq = {
-        .channels    = BIT(ADC_CHANNEL),
-        .buffer      = &raw,
-        .buffer_size = sizeof(raw),
-        .resolution  = ADC_RESOLUTION,
+        .channels     = BIT(ADC_CHANNEL),
+        .buffer       = &raw,
+        .buffer_size  = sizeof(raw),
+        .resolution   = ADC_RESOLUTION,
+        .oversampling = 4, // 16 samples averaged
     };
 
     if (!device_is_ready(adc_dev)) {
@@ -96,10 +98,18 @@ static float read_battery_voltage(void)
         return -1.0f;
     }
 
-    int32_t mv = raw;
-    adc_raw_to_millivolts(adc_ref_internal(adc_dev), ADC_GAIN_1_6, ADC_RESOLUTION, &mv);
+    // Sometimes the SAADC reads slightly below 0 due to ground noise
+    if (raw < 0) {
+        raw = 0;
+    }
 
-    return (mv / 1000.0f) * VDIVIDER_MULT;
+    // Calculating the actual voltage sitting on pin A1
+    float pin_voltage = ((float)raw / 4095.0f) * 3.6f;
+
+    // Multiplying by voltage divider to get the total battery voltage
+    float battery_voltage = pin_voltage * VDIVIDER_MULT;
+
+    return battery_voltage;
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
@@ -108,19 +118,22 @@ int main(void)
 {
     int err;
 
-    if (!device_is_ready(gpio0)) {
-        return 0;
+    // 1. GPIO Init
+    if (device_is_ready(gpio0)) {
+        gpio_pin_configure(gpio0, LED_PIN, GPIO_OUTPUT_ACTIVE);
     }
-    gpio_pin_configure(gpio0, LED_PIN, GPIO_OUTPUT_ACTIVE);
 
+    // 2. ADC Init
     adc_channel_setup(adc_dev, &adc_cfg);
 
+    // 3. Bluetooth Init
     err = bt_enable(NULL);
     if (err) {
         printk("Bluetooth init failed (err %d)\n", err);
         return 0;
     }
 
+    // Starting advertising with both primary (ad) and secondary (sd) packets
     err = bt_le_adv_start(&adv_param, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
     if (err) {
         printk("Advertising failed to start (err %d)\n", err);
@@ -129,17 +142,20 @@ int main(void)
 
     printk("Advertising started as: %s\n", CONFIG_BT_DEVICE_NAME);
 
+    // 4. Main Loop
     while (1) {
-        gpio_pin_toggle(gpio0, LED_PIN);
-
         if (active_conn) {
             float batt = read_battery_voltage();
+
             char msg[32];
             snprintf(msg, sizeof(msg), "Batt: %.2fV\n", (double)batt);
             
+            // Sending the text string via Nordic UART Service
             bt_nus_send(active_conn, (uint8_t *)msg, strlen(msg));
             printk("%s", msg);
         }
+
+        // gpio_pin_toggle(gpio0, LED_PIN);
 
         k_msleep(LOOP_INTERVAL_MS);
     }
