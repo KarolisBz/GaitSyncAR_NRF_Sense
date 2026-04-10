@@ -75,11 +75,17 @@ int main(void) {
         // printk("Magnitude: %d\n", mag);
 
         if (step_detected) {
-            printk(">>> STEP DETECTED! (Mag: %d) <<<\n", mag);
-            
-            // Instantly send the step event to the phone
             char step_msg[32];
-            snprintf(step_msg, sizeof(step_msg), "STEP:%d\n", mag);
+            
+            if (device_role_is_primary()) {
+                printk(">>> RIGHT STEP DETECTED! (Mag: %d) <<<\n", mag);
+                snprintf(step_msg, sizeof(step_msg), "RIGHT_STEP:%d\n", mag);
+            } else {
+                printk(">>> LEFT STEP DETECTED! (Mag: %d) <<<\n", mag);
+                snprintf(step_msg, sizeof(step_msg), "LEFT_STEP:%d\n", mag);
+            }
+            
+            /* Instantly send the step event to the phone */
             ble_handler_send((uint8_t *)step_msg, strlen(step_msg));
         }
 
