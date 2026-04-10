@@ -4,5 +4,7 @@ cmake_minimum_required(VERSION 3.20.0)
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(GaitSyncAR_NRF_Sense)
 
-target_sources(app PRIVATE src/main.c src/nfc.c)
+target_sources(app PRIVATE 
+    src/main.c 
+)
 target_include_directories(app PUBLIC include)
