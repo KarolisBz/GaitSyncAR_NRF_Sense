@@ -6,6 +6,7 @@
 #include <bluetooth/services/nus.h>
 #include <stdio.h>
 #include <string.h>
+#include "device_role.h"
 
 /* --- GLOBALS --- */
 static struct bt_conn *active_conn = NULL;
@@ -16,8 +17,13 @@ static struct bt_data ad[] = {
     BT_DATA_BYTES(BT_DATA_UUID128_ALL, BT_UUID_NUS_VAL),
 };
 
-static struct bt_data sd[] = {
-    BT_DATA(BT_DATA_NAME_COMPLETE, CONFIG_BT_DEVICE_NAME, sizeof(CONFIG_BT_DEVICE_NAME) - 1),
+// The dynamic names for the Left and Right sensors
+static const struct bt_data sd_primary[] = {
+    BT_DATA(BT_DATA_NAME_COMPLETE, "GaitSync-Right", 14),
+};
+
+static const struct bt_data sd_secondary[] = {
+    BT_DATA(BT_DATA_NAME_COMPLETE, "GaitSync-Left", 13),
 };
 
 static struct bt_le_adv_param adv_param = {
@@ -35,7 +41,14 @@ static void restart_ad_handler(struct k_work *work)
     bt_le_adv_stop();
     k_sleep(K_MSEC(50));
 
-    int err = bt_le_adv_start(&adv_param, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
+    int err;
+    bool is_primary = device_role_is_primary();
+
+    err = bt_le_adv_start(&adv_param, 
+                            ad, 
+                            ARRAY_SIZE(ad), 
+                            is_primary ? sd_primary : sd_secondary, 
+                            is_primary ? ARRAY_SIZE(sd_primary) : ARRAY_SIZE(sd_secondary));
     
     if (err) {
         printk("Adv restart failed (err %d). Retrying...\n", err);
@@ -99,7 +112,13 @@ int ble_handler_init(void) {
 
     printk("  -> Starting Advertising...\n");
     k_sleep(K_MSEC(100)); // Add a tiny 100ms delay to let the USB flush before we hit the radio
-    err = bt_le_adv_start(&adv_param, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
+
+    bool is_primary = device_role_is_primary();
+    err = bt_le_adv_start(&adv_param, 
+                          ad, 
+                          ARRAY_SIZE(ad), 
+                          is_primary ? sd_primary : sd_secondary, 
+                          is_primary ? ARRAY_SIZE(sd_primary) : ARRAY_SIZE(sd_secondary));
     if (err) return err;
 
     printk("  -> BLE Ready!\n");

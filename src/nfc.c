@@ -8,6 +8,7 @@
 #include <nfc/ndef/text_rec.h>
 #include <stdio.h>
 #include <string.h>
+#include "device_role.h"
 
 #define NDEF_MSG_BUF_SIZE 256
 
@@ -41,9 +42,9 @@ int nfc_handler_init(void)
     }
     
     bt_id_get(addrs, &count);
-
     snprintf(payload_string, sizeof(payload_string), 
-             "Hello World! My BLE MAC is: %02X:%02X:%02X:%02X:%02X:%02X",
+             "%s Sensor! My BLE MAC is: %02X:%02X:%02X:%02X:%02X:%02X",
+             device_role_is_primary() ? "Right" : "Left",
              addrs[0].a.val[5], addrs[0].a.val[4], addrs[0].a.val[3],
              addrs[0].a.val[2], addrs[0].a.val[1], addrs[0].a.val[0]);
              
