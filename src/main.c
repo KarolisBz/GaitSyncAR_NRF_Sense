@@ -13,10 +13,10 @@ int main(void) {
     }
 
     // module led pin
-    gpio_pin_configure(gpio0, 6, GPIO_OUTPUT_ACTIVE);
+    gpio_pin_configure(gpio0, 6, GPIO_OUTPUT_INACTIVE | GPIO_ACTIVE_LOW);
 
     // external pin, p0.29 blue led
-    gpio_pin_configure(gpio0, 29, GPIO_OUTPUT_ACTIVE);
+    gpio_pin_configure(gpio0, 29, GPIO_OUTPUT_INACTIVE | GPIO_ACTIVE_HIGH);
 
     // Wait for USB console to stabilize
     k_sleep(K_MSEC(3000));
