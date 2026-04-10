@@ -38,7 +38,7 @@ static void on_connected(struct bt_conn *conn, uint8_t err)
         return;
     }
     active_conn = bt_conn_ref(conn);
-    printk("BLE connected\n");
+    printk("\n>>> BLE DEVICE CONNECTED! <<<\n");
 }
 
 static void on_disconnected(struct bt_conn *conn, uint8_t reason)
@@ -47,7 +47,7 @@ static void on_disconnected(struct bt_conn *conn, uint8_t reason)
         bt_conn_unref(active_conn);
         active_conn = NULL;
     }
-    printk("BLE disconnected (reason %u)\n", reason);
+    printk("\n>>> BLE DEVICE DISCONNECTED (reason %u) <<<\n", reason);
 }
 
 BT_CONN_CB_DEFINE(conn_callbacks) = {
@@ -71,9 +71,12 @@ int ble_handler_init(void)
     int err;
 
     err = bt_enable(NULL);
-    if (err) return err;
+    if (err) {
+        printk("Bluetooth init failed (err %d)\n", err);
+        return err;
+    }
 
-    /* CRITICAL: Initialize the NUS service before advertising */
+    /* Initializing the NUS service before advertising */
     err = bt_nus_init(&nus_cb);
     if (err) {
         printk("NUS init failed (err %d)\n", err);
@@ -81,7 +84,13 @@ int ble_handler_init(void)
     }
 
     err = bt_le_adv_start(&adv_param, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
-    // ... rest of your code
+    if (err) {
+        printk("Advertising failed to start (err %d)\n", err);
+        return err;
+    }
+
+    printk("BLE Advertising successfully started!\n");
+    return 0;
 }
 
 int ble_handler_send(const uint8_t *data, uint16_t len)
@@ -90,7 +99,5 @@ int ble_handler_send(const uint8_t *data, uint16_t len)
         return -ENOTCONN;
     }
     
-    // In this specific task, we ignore the passed data and just send Hello World
-    const char *hello = "Hello World\n";
-    return bt_nus_send(active_conn, (const uint8_t *)hello, strlen(hello));
+    return bt_nus_send(active_conn, data, len);
 }
