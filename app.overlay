@@ -15,6 +15,10 @@
 	};
 };
 
+&nfct {
+    status = "okay";
+};
+
 &adc {
 	status = "okay";
 	#address-cells = <1>;

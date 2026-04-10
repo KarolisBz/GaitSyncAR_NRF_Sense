@@ -1,10 +1,13 @@
 #include <zephyr/kernel.h>
 #include <zephyr/sys/printk.h>
 #include <zephyr/drivers/gpio.h>
-#include "ble_handler.h"
 #include <stdio.h>
+// custom modules
+#include "ble_handler.h"
 #include "battery_monitor.h"
 #include "imu_step.h"
+#include "nfc_handler.h"
+#include "device_role.h"
 
 const struct device *const gpio0 = DEVICE_DT_GET(DT_NODELABEL(gpio0));
 
@@ -23,6 +26,22 @@ int main(void) {
     k_sleep(K_MSEC(3000));
     printk("\n--- GaitSyncAR Booting Up ---\n");
 
+    // fetch device identity and assign role //
+    device_role_init();
+
+    // Initialize BLE //
+    if (ble_handler_init() != 0) {
+        printk("FATAL: Failed to start BLE!\n");
+    }
+
+    // Initialize NFC //
+    int nfc_err = nfc_handler_init();
+    if (nfc_err != 0) {
+        printk("NFC Init Failed: %d\n", nfc_err);
+    } else {
+        printk("  -> NFC Tag Emulation Started!\n");
+    }
+
     // Initialize Battery Monitor //
     int err = battery_monitor_init();
     if (err != 0) {
@@ -31,8 +50,8 @@ int main(void) {
 
     // configuring imu step detection //
     imu_step_config_t step_cfg = {
-        .threshold = 1500,    // MUST spike above 12.0 m/s^2 to count as a landing
-        .noise_floor = 700,   // MUST drop below 7.0 m/s^2 to count as swinging in the air
+        .threshold = 1550,    // MUST spike above 12.5 m/s^2 to count as a landing
+        .noise_floor = 650,   // MUST drop below 6.5 m/s^2 to count as swinging in the air
         .cooldown_ms = 350
     };
     imu_step_init(step_cfg);
@@ -42,11 +61,6 @@ int main(void) {
     }
 
     printk("  -> Starting loop...\n");
-
-    // Initialize BLE //
-    if (ble_handler_init() != 0) {
-        printk("FATAL: Failed to start BLE!\n");
-    }
 
     // Track the time for slower tasks
     uint64_t last_slow_task_time = k_uptime_get();
@@ -58,7 +72,7 @@ int main(void) {
         // Fast tasks (50ms) 20Hz -------------------------------------------------------------------
         int32_t mag;
         bool step_detected = imu_step_update(&mag);
-        printk("Magnitude: %d\n", mag);
+        // printk("Magnitude: %d\n", mag);
 
         if (step_detected) {
             printk(">>> STEP DETECTED! (Mag: %d) <<<\n", mag);

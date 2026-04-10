@@ -9,5 +9,7 @@ target_sources(app PRIVATE
     src/ble.c
     src/battery_monitor.c
     src/imu_step.c
+    src/nfc.c
+    src/device_role.c
 )
 target_include_directories(app PUBLIC include)

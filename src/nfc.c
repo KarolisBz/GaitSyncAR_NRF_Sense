@@ -33,9 +33,10 @@ int nfc_handler_init(void)
     static const uint8_t lang_code[] = {'e', 'n'};
 
     /* 1. Get BLE Address for the payload */
+    // ignore the "already enabled" error since we just want to make sure BT is on to read the MAC address
     err = bt_enable(NULL);
-    if (err) {
-        printk("Bluetooth init failed (err %d)\n", err);
+    if (err && err != -EALREADY) {
+        printk("NFC: Failed to enable BT (err %d)\n", err);
         return err;
     }
     
