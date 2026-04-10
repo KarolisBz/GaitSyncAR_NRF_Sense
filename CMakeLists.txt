@@ -7,5 +7,6 @@ project(GaitSyncAR_NRF_Sense)
 target_sources(app PRIVATE 
     src/main.c 
     src/ble.c
+    src/battery_monitor.c
 )
 target_include_directories(app PUBLIC include)

@@ -2,7 +2,8 @@
 #include <zephyr/sys/printk.h>
 #include <zephyr/drivers/gpio.h>
 #include "ble_handler.h"
-#include <stdio.h> /* Required for snprintf */
+#include <stdio.h>
+#include "battery_monitor.h"
 
 const struct device *const gpio0 = DEVICE_DT_GET(DT_NODELABEL(gpio0));
 
@@ -20,34 +21,24 @@ int main(void) {
         printk("FATAL: Failed to start BLE!\n");
     }
 
-    /* fake voltage variable to test dynamic data */
-    int simulated_voltage_mv = 3300; 
+    int err = battery_monitor_init();
+    if (err != 0) {
+        printk("Battery Monitor Init Failed: %d\n", err);
+    }
 
     while (1) {
         gpio_pin_toggle(gpio0, 6);
+
+        uint32_t batt_mv = battery_monitor_get_mv();
         
-        /* 1. empty character buffer to hold message */
-        char tx_buffer[64]; 
+        char tx_buffer[64];
+        snprintf(tx_buffer, sizeof(tx_buffer), "Batt: %u mV\n", batt_mv);
         
-        /* 2. Formatting the string */
-        snprintf(tx_buffer, sizeof(tx_buffer), "Batt: %d mV\n", simulated_voltage_mv);
+        /* Send to BLE and print to USB for debugging */
+        ble_handler_send((uint8_t *)tx_buffer, strlen(tx_buffer));
+        printk("%s", tx_buffer);
         
-        /* 3. Sending the formatted buffer over BLE */
-        int err = ble_handler_send((const uint8_t *)tx_buffer, strlen(tx_buffer));
-        
-        if (err == 0) {
-            /* Printing the exact same buffer to USB so we can verify it */
-            printk("BLE Sent: %s", tx_buffer);
-            
-            /* Changing the voltage slightly for the next loop so we see it update */
-            simulated_voltage_mv -= 10; 
-            if (simulated_voltage_mv < 3000) simulated_voltage_mv = 3300; 
-            
-        } else if (err == -ENOTCONN) {
-            printk("Waiting for phone to connect...\n");
-        }
-        
-        k_msleep(1000);
+        k_msleep(2000);
     }
 
     return 0;
