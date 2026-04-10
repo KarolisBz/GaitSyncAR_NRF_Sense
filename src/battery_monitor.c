@@ -8,6 +8,8 @@ int battery_monitor_init(void) {
     if (!adc_is_ready_dt(&adc_chan0)) {
         return -ENODEV;
     }
+
+    printk("  -> Enabling Battery Monitor...\n");
     return adc_channel_setup_dt(&adc_chan0);
 }
 

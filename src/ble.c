@@ -11,20 +11,21 @@
 static struct bt_conn *active_conn = NULL;
 static struct k_work_delayable adv_start_work; // <--- DECLARE THIS AT THE TOP
 
-static const struct bt_data ad[] = {
+static struct bt_data ad[] = {
     BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
     BT_DATA_BYTES(BT_DATA_UUID128_ALL, BT_UUID_NUS_VAL),
 };
 
-static const struct bt_data sd[] = {
+static struct bt_data sd[] = {
     BT_DATA(BT_DATA_NAME_COMPLETE, CONFIG_BT_DEVICE_NAME, sizeof(CONFIG_BT_DEVICE_NAME) - 1),
 };
 
-static const struct bt_le_adv_param adv_param = BT_LE_ADV_PARAM_INIT(
-    BT_LE_ADV_OPT_CONN,
-    BT_GAP_ADV_FAST_INT_MIN_2,
-    BT_GAP_ADV_FAST_INT_MAX_2,
-    NULL);
+static struct bt_le_adv_param adv_param = {
+    .options = BT_LE_ADV_OPT_CONN,
+    .interval_min = BT_GAP_ADV_FAST_INT_MIN_2,
+    .interval_max = BT_GAP_ADV_FAST_INT_MAX_2,
+    .peer = NULL,
+};
 
 /* --- WORK HANDLERS --- */
 
@@ -85,18 +86,23 @@ static struct bt_nus_cb nus_cb = {
 int ble_handler_init(void) {
     int err;
 
+    printk("  -> Init Workqueue...\n");
     k_work_init_delayable(&adv_start_work, restart_ad_handler);
 
+    printk("  -> Enabling Bluetooth Stack...\n");
     err = bt_enable(NULL);
     if (err) return err;
 
+    printk("  -> Initializing NUS Service...\n");
     err = bt_nus_init(&nus_cb);
     if (err) return err;
 
+    printk("  -> Starting Advertising...\n");
+    k_sleep(K_MSEC(100)); // Add a tiny 100ms delay to let the USB flush before we hit the radio
     err = bt_le_adv_start(&adv_param, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
     if (err) return err;
 
-    printk("BLE Ready!\n");
+    printk("  -> BLE Ready!\n");
     return 0;
 }
 
