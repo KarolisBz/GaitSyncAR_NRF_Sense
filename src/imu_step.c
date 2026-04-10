@@ -39,45 +39,52 @@ int imu_step_init(imu_step_config_t config) {
     return 0;
 }
 
+static int32_t previous_mag = 980; // Start assumed at 1G
+typedef enum {
+    PHASE_GROUND = 0,
+    PHASE_AIR = 1
+} foot_phase_t;
+
+static foot_phase_t current_phase = PHASE_GROUND;
+
 bool imu_step_update(int32_t *out_magnitude) {
     struct sensor_value accel[3];
     uint64_t now = k_uptime_get();
     bool step_detected = false;
 
-    // Fetch fresh data from the IMU hardware
-    if (sensor_sample_fetch(imu_dev) < 0) {
-        return false; /* Hardware read failed this cycle */
-    }
-    
-    if (sensor_channel_get(imu_dev, SENSOR_CHAN_ACCEL_XYZ, accel) < 0) {
-        return false;
-    }
+    if (sensor_sample_fetch(imu_dev) < 0) return false;
+    if (sensor_channel_get(imu_dev, SENSOR_CHAN_ACCEL_XYZ, accel) < 0) return false;
 
-    // Converting Zephyr structs to standard m/s^2 doubles
     double ax = sensor_value_to_double(&accel[0]);
     double ay = sensor_value_to_double(&accel[1]);
     double az = sensor_value_to_double(&accel[2]);
 
-    // Calculating 3D Vector Magnitude
+    /* Calculate raw magnitude (1G = ~980) */
     double magnitude = sqrt((ax * ax) + (ay * ay) + (az * az));
     int32_t scaled_mag = (int32_t)(magnitude * 100);
 
-    // Passing the magnitude out if the caller asked for it
     if (out_magnitude != NULL) {
         *out_magnitude = scaled_mag;
     }
 
-    // Algorithm Step 1: Hysteresis Reset
-    if (is_stepping && (scaled_mag < current_config.noise_floor)) {
-        is_stepping = false;
-    }
-
-    // Algorithm Step 2: Trigger & Cooldown Check
-    if (!is_stepping && (scaled_mag > current_config.threshold)) {
-        if ((now - last_step_time) > current_config.cooldown_ms) {
-            step_detected = true;
-            is_stepping = true;    // Lock state
-            last_step_time = now;  // Record timestamp
+    /* --- THE STATE MACHINE --- */
+    
+    if (current_phase == PHASE_GROUND) {
+        /* 1. Wait for the foot to lift off and swing (Magnitude drops below gravity) */
+        if (scaled_mag < current_config.noise_floor) {
+            current_phase = PHASE_AIR;
+        }
+    } 
+    else if (current_phase == PHASE_AIR) {
+        /* 2. Foot is in the air. Wait for the hard impact (Magnitude spikes above gravity) */
+        if (scaled_mag > current_config.threshold) {
+            
+            /* 3. Debounce to prevent vibrations from triggering twice */
+            if ((now - last_step_time) > current_config.cooldown_ms) {
+                step_detected = true;
+                current_phase = PHASE_GROUND; // Lock it back to the ground state
+                last_step_time = now;
+            }
         }
     }
 

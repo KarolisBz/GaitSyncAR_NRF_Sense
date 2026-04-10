@@ -31,9 +31,9 @@ int main(void) {
 
     // configuring imu step detection //
     imu_step_config_t step_cfg = {
-        .threshold = 1500,    // Trigger step if magnitude > 15.00 m/s^2
-        .noise_floor = 1100,  // Reset trigger when it drops back to 11.00 m/s^2
-        .cooldown_ms = 300    // Human step cooldown
+        .threshold = 1500,    // MUST spike above 12.0 m/s^2 to count as a landing
+        .noise_floor = 700,   // MUST drop below 7.0 m/s^2 to count as swinging in the air
+        .cooldown_ms = 350
     };
     imu_step_init(step_cfg);
 
