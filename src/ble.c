@@ -7,8 +7,10 @@
 #include <stdio.h>
 #include <string.h>
 #include "device_role.h"
+#include <stdbool.h>
+#include <stdint.h>
 
-/* --- GLOBALS --- */
+// Fields
 static struct bt_conn *active_conn = NULL;
 static struct k_work_delayable adv_start_work;
 
@@ -27,6 +29,37 @@ static const struct bt_data sd_primary[] = {
 static const struct bt_data sd_secondary[] = {
     BT_DATA(BT_DATA_NAME_COMPLETE, "GaitSync-Left", 13),
 };
+
+// ----------------------- Custom Binary Payloads ----------------------- //
+// --- Battery event --- //
+struct __attribute__((packed)) BatteryData {
+    uint8_t type; // 2 = battery event identifier
+    uint8_t level; // Battery level (0-100)
+};
+// Battery event macro for hardcoded initialization
+#define BATTERY_EVENT_INIT(lvl) { .type = 2, .level = (lvl) }
+// --------------------- //
+
+// --- Step event --- //
+struct __attribute__((packed)) GaitData {
+    uint8_t type;       // 1 = step event identifier
+    uint32_t timestamp; // Full 32-bit millisecond timer, valid for 49.7 days of uptime before rolling over
+};
+// Step event macro for hardcoded initialization
+#define GAIT_EVENT_INIT(timestamp_val) { .type = 1, .timestamp = (timestamp_val) }
+// ------------------- //
+
+void send_step_event() {
+    struct GaitData myData = GAIT_EVENT_INIT(k_uptime_get_32());
+    ble_handler_send((uint8_t *)&myData, sizeof(myData));
+}
+
+void send_battery_event(uint8_t battery_level) {
+    struct BatteryData myData = BATTERY_EVENT_INIT(battery_level);
+    ble_handler_send((uint8_t *)&myData, sizeof(myData));
+}
+
+// ---------------------------------------------------------------------- //
 
 static struct bt_le_adv_param adv_param = {
     .options = BT_LE_ADV_OPT_CONN,

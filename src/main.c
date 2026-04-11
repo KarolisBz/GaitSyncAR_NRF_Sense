@@ -75,18 +75,7 @@ int main(void) {
         // printk("Magnitude: %d\n", mag);
 
         if (step_detected) {
-            char step_msg[32];
-            
-            if (device_role_is_primary()) {
-                printk(">>> RIGHT STEP DETECTED! (Mag: %d) <<<\n", mag);
-                snprintf(step_msg, sizeof(step_msg), "RIGHT_STEP:%d\n", mag);
-            } else {
-                printk(">>> LEFT STEP DETECTED! (Mag: %d) <<<\n", mag);
-                snprintf(step_msg, sizeof(step_msg), "LEFT_STEP:%d\n", mag);
-            }
-            
-            /* Instantly send the step event to the phone */
-            ble_handler_send((uint8_t *)step_msg, strlen(step_msg));
+           send_step_event();
         }
 
         // Slow tasks (2000ms) 0.5Hz -------------------------------------------------------------------
@@ -98,14 +87,9 @@ int main(void) {
             gpio_pin_toggle(gpio0, 29);
 
             // Read battery voltage and send over BLE //
-            uint32_t batt_mv = battery_monitor_get_mv();
-            
-            char tx_buffer[64];
-            snprintf(tx_buffer, sizeof(tx_buffer), "Batt: %u mV\n", batt_mv);
-            
-            /* Send to BLE and print to USB for debugging */
-            ble_handler_send((uint8_t *)tx_buffer, strlen(tx_buffer));
-            printk("%s", tx_buffer);
+            uint8_t batt_percentage = battery_monitor_get_percentage();
+            send_battery_event(batt_percentage);
+            printk("Battery Percentage: %u%%\n", batt_percentage);
 
         }
 
