@@ -55,7 +55,7 @@ int main(void) {
 
     // configuring imu step detection //
     imu_step_config_t step_cfg = {
-        .threshold = 1550,    // MUST spike above 12.5 m/s^2 to count as a landing
+        .threshold = 1600,    // MUST spike above 16 m/s^2 to count as a landing
         .noise_floor = 650,   // MUST drop below 6.5 m/s^2 to count as swinging in the air
         .cooldown_ms = 350
     };
@@ -88,8 +88,8 @@ int main(void) {
            send_step_event();
         }
 
-        // Slow tasks (4000ms) 0.25Hz -------------------------------------------------------------------
-        if ((now - last_slow_task_time) >= 4000) {
+        // Slow tasks (2000ms) 0.5Hz -------------------------------------------------------------------
+        if ((now - last_slow_task_time) >= 2000) {
             last_slow_task_time = now; // Reset the timer
 
             // Read battery voltage and send over BLE //
