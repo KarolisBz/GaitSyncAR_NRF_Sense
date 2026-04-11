@@ -8,19 +8,24 @@
 #include "imu_step.h"
 #include "nfc_handler.h"
 #include "device_role.h"
+#include "led_pwm.h"
 
-const struct device *const gpio0 = DEVICE_DT_GET(DT_NODELABEL(gpio0));
+// Synchronization Semaphore
+K_SEM_DEFINE(main_loop_sem, 0, 1);
+struct k_timer metronome_timer;
+
+// Metronome ISR
+void metronome_handler(struct k_timer *timer_id) {
+    k_sem_give(&main_loop_sem);
+}
 
 int main(void) {
-    if (!device_is_ready(gpio0)) {
-        return 0;
-    }
+    // Initialize LED module
+    led_pwm_init();
 
-    // module led pin
-    gpio_pin_configure(gpio0, 6, GPIO_OUTPUT_INACTIVE | GPIO_ACTIVE_LOW);
-
-    // external pin, p0.29 blue led 
-    gpio_pin_configure(gpio0, 29, GPIO_OUTPUT_INACTIVE | GPIO_ACTIVE_HIGH);
+    // Starting the metronome at exactly 100Hz (10ms)
+    k_timer_init(&metronome_timer, metronome_handler, NULL);
+    k_timer_start(&metronome_timer, K_MSEC(10), K_MSEC(10));
 
     // Wait for USB console to stabilize //
     k_sleep(K_MSEC(3000));
@@ -66,10 +71,15 @@ int main(void) {
     uint64_t last_slow_task_time = k_uptime_get();
 
     while (1) {
+        // Waiting indefinitely until the metronome drops a token
+        // The CPU sleeps, background tasks (like BLE) can still run and will preempt this when needed
+        // This prevent time drifts that can occur with k_sleep() and ensures our 100Hz loop runs as accurately as possible
+        k_sem_take(&main_loop_sem, K_FOREVER);
+
         // Fetch uptime
         uint64_t now = k_uptime_get();
 
-        // Fast tasks (50ms) 20Hz -------------------------------------------------------------------
+        // Fast tasks (10ms) 100Hz -------------------------------------------------------------------
         int32_t mag;
         bool step_detected = imu_step_update(&mag);
         // printk("Magnitude: %d\n", mag);
@@ -78,23 +88,18 @@ int main(void) {
            send_step_event();
         }
 
-        // Slow tasks (2000ms) 0.5Hz -------------------------------------------------------------------
-        if ((now - last_slow_task_time) >= 2000) {
+        // Slow tasks (4000ms) 0.25Hz -------------------------------------------------------------------
+        if ((now - last_slow_task_time) >= 4000) {
             last_slow_task_time = now; // Reset the timer
-
-             // Toggle leds //
-            gpio_pin_toggle(gpio0, 6);
-            gpio_pin_toggle(gpio0, 29);
 
             // Read battery voltage and send over BLE //
             uint8_t batt_percentage = battery_monitor_get_percentage();
             send_battery_event(batt_percentage);
             printk("Battery Percentage: %u%%\n", batt_percentage);
-
         }
 
-        // main loop 50ms, 20Hz
-        k_msleep(50);
+        // main loop 10ms, 100Hz
+        k_msleep(10);
     }
 
     return 0;

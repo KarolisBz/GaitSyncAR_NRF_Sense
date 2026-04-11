@@ -11,5 +11,6 @@ target_sources(app PRIVATE
     src/imu_step.c
     src/nfc.c
     src/device_role.c
+    src/led_pwm.c
 )
 target_include_directories(app PUBLIC include)
