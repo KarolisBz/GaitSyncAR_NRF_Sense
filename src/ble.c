@@ -10,11 +10,13 @@
 
 /* --- GLOBALS --- */
 static struct bt_conn *active_conn = NULL;
-static struct k_work_delayable adv_start_work; // <--- DECLARE THIS AT THE TOP
+static struct k_work_delayable adv_start_work;
 
 static struct bt_data ad[] = {
     BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
     BT_DATA_BYTES(BT_DATA_UUID128_ALL, BT_UUID_NUS_VAL),
+    // dummy data to trigger the "Manufacturer Data" field in the BLE scanner, since some phones don't show the full name without it
+    BT_DATA_BYTES(BT_DATA_MANUFACTURER_DATA, 0xFF, 0xFF, 0x01),
 };
 
 // The dynamic names for the Left and Right sensors
@@ -111,7 +113,7 @@ int ble_handler_init(void) {
     if (err) return err;
 
     printk("  -> Starting Advertising...\n");
-    k_sleep(K_MSEC(100)); // Add a tiny 100ms delay to let the USB flush before we hit the radio
+    k_sleep(K_MSEC(100)); // 100ms delay to let the USB flush before we hit the radio
 
     bool is_primary = device_role_is_primary();
     err = bt_le_adv_start(&adv_param, 
