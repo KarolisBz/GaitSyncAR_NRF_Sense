@@ -1,12 +1,14 @@
 #include "ble_handler.h"
 #include <zephyr/kernel.h>
 #include <zephyr/bluetooth/bluetooth.h>
+#include <zephyr/bluetooth/gatt.h>
 #include <zephyr/bluetooth/conn.h>
 #include <zephyr/bluetooth/uuid.h>
 #include <bluetooth/services/nus.h>
 #include <stdio.h>
 #include <string.h>
 #include "device_role.h"
+#include "clock_sync.h"
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -17,11 +19,9 @@ static struct k_work_delayable adv_start_work;
 static struct bt_data ad[] = {
     BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
     BT_DATA_BYTES(BT_DATA_UUID128_ALL, BT_UUID_NUS_VAL),
-    // dummy data to trigger the "Manufacturer Data" field in the BLE scanner, since some phones don't show the full name without it
     BT_DATA_BYTES(BT_DATA_MANUFACTURER_DATA, 0xFF, 0xFF, 0x01),
 };
 
-// The dynamic names for the Left and Right sensors
 static const struct bt_data sd_primary[] = {
     BT_DATA(BT_DATA_NAME_COMPLETE, "GaitSync-Right", 14),
 };
@@ -31,31 +31,48 @@ static const struct bt_data sd_secondary[] = {
 };
 
 // ----------------------- Custom Binary Payloads ----------------------- //
-// --- Battery event --- //
-struct __attribute__((packed)) BatteryData {
-    uint8_t type; // 2 = battery event identifier
-    uint8_t level; // Battery level (0-100)
-};
-// Battery event macro for hardcoded initialization
-#define BATTERY_EVENT_INIT(lvl) { .type = 2, .level = (lvl) }
-// --------------------- //
 
-// --- Step event --- //
-struct __attribute__((packed)) GaitData {
-    uint8_t type;       // 1 = step event identifier
-    uint32_t timestamp; // Full 32-bit millisecond timer, valid for 49.7 days of uptime before rolling over
+// --- Battery event (Type 2) --- //
+struct __attribute__((packed)) BatteryData {
+    uint8_t type; 
+    uint8_t level; 
 };
-// Step event macro for hardcoded initialization
+#define BATTERY_EVENT_INIT(lvl) { .type = 2, .level = (lvl) }
+
+// --- Step event (Type 1) --- //
+struct __attribute__((packed)) GaitData {
+    uint8_t type;       
+    uint32_t timestamp; 
+};
 #define GAIT_EVENT_INIT(timestamp_val) { .type = 1, .timestamp = (timestamp_val) }
-// ------------------- //
+
+// --- Sync Acknowledgment (Type 4) --- //
+struct __attribute__((packed)) SyncAckData {
+    uint8_t type;       
+    uint32_t timestamp; 
+};
+#define SYNC_ACK_INIT(timestamp_val) { .type = 4, .timestamp = (timestamp_val) }
+
+// ---------------------------------------------------------------------- //
 
 void send_step_event() {
-    struct GaitData myData = GAIT_EVENT_INIT(k_uptime_get_32());
+    if (!is_hardware_synced) return;
+
+    // Calculate time elapsed since the silicon-level sync occurred
+    uint32_t relativeTimestamp = k_uptime_get_32() - global_sync_baseline_ms;
+
+    struct GaitData myData = GAIT_EVENT_INIT(relativeTimestamp);
     ble_handler_send((uint8_t *)&myData, sizeof(myData));
 }
 
 void send_battery_event(uint8_t battery_level) {
+    if (!is_hardware_synced) return;
     struct BatteryData myData = BATTERY_EVENT_INIT(battery_level);
+    ble_handler_send((uint8_t *)&myData, sizeof(myData));
+}
+
+void send_sync_ack_event(uint32_t baseline_time) {
+    struct SyncAckData myData = SYNC_ACK_INIT(baseline_time);
     ble_handler_send((uint8_t *)&myData, sizeof(myData));
 }
 
@@ -69,8 +86,6 @@ static struct bt_le_adv_param adv_param = {
 };
 
 /* --- WORK HANDLERS --- */
-
-/* This runs on the system workqueue to safely restart advertising */
 static void restart_ad_handler(struct k_work *work)
 {
     bt_le_adv_stop();
@@ -94,7 +109,6 @@ static void restart_ad_handler(struct k_work *work)
 }
 
 /* --- CONNECTION CALLBACKS --- */
-
 static void on_connected(struct bt_conn *conn, uint8_t err) {
     if (err) {
         printk("Connection failed (err %u)\n", err);
@@ -112,7 +126,6 @@ static void on_disconnected(struct bt_conn *conn, uint8_t reason) {
         active_conn = NULL;
     }
 
-    /* Wait 500ms for the stack to clear before restarting */
     k_work_reschedule(&adv_start_work, K_MSEC(500));
 }
 
@@ -122,9 +135,8 @@ BT_CONN_CB_DEFINE(conn_callbacks) = {
 };
 
 /* --- API IMPLEMENTATION --- */
-
 static void bt_receive_cb(struct bt_conn *conn, const uint8_t *const data, uint16_t len) {
-    // RX logic here (not used yet)
+    on_ble_rx_received(data, len); 
 }
 
 static struct bt_nus_cb nus_cb = {
@@ -146,7 +158,7 @@ int ble_handler_init(void) {
     if (err) return err;
 
     printk("  -> Starting Advertising...\n");
-    k_sleep(K_MSEC(100)); // 100ms delay to let the USB flush before we hit the radio
+    k_sleep(K_MSEC(100)); 
 
     bool is_primary = device_role_is_primary();
     err = bt_le_adv_start(&adv_param, 
@@ -163,4 +175,13 @@ int ble_handler_init(void) {
 int ble_handler_send(const uint8_t *data, uint16_t len) {
     if (!active_conn) return -ENOTCONN;
     return bt_nus_send(active_conn, data, len);
+}
+
+void on_ble_rx_received(const uint8_t *data, uint16_t len) {
+    printk("BLE Data Received! Length: %d, Byte 0: %d\n", len, data[0]);
+
+    if (len > 0 && data[0] == 3) {
+        printk("Unity triggered Sync! Requesting timeslot...\n");
+        request_sync_timeslot();
+    }
 }

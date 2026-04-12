@@ -12,5 +12,6 @@ target_sources(app PRIVATE
     src/nfc.c
     src/device_role.c
     src/led_pwm.c
+    src/clock_sync.c
 )
 target_include_directories(app PUBLIC include)

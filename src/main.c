@@ -9,6 +9,10 @@
 #include "nfc_handler.h"
 #include "device_role.h"
 #include "led_pwm.h"
+#include "clock_sync.h"
+
+// Fields
+bool sync_ack_sent = false;
 
 // Synchronization Semaphore
 K_SEM_DEFINE(main_loop_sem, 0, 1);
@@ -53,6 +57,9 @@ int main(void) {
         printk("Battery Monitor Init Failed: %d\n", err);
     }
 
+    // Initialize Clock Synchronization //
+    clock_sync_init();
+
     // configuring imu step detection //
     imu_step_config_t step_cfg = {
         .threshold = 1600,    // MUST spike above 16 m/s^2 to count as a landing
@@ -76,6 +83,13 @@ int main(void) {
         // This prevent time drifts that can occur with k_sleep() and ensures our 100Hz loop runs as accurately as possible
         k_sem_take(&main_loop_sem, K_FOREVER);
 
+        if (is_hardware_synced && !sync_ack_sent) {
+
+            send_sync_ack_event(global_sync_baseline_ms);
+            sync_ack_sent = true; 
+            printk("HARDWARE SYNC COMPLETE at baseline %u ms\n", global_sync_baseline_ms);
+        }
+
         // Fetch uptime
         uint64_t now = k_uptime_get();
 
@@ -97,9 +111,6 @@ int main(void) {
             send_battery_event(batt_percentage);
             printk("Battery Percentage: %u%%\n", batt_percentage);
         }
-
-        // main loop 10ms, 100Hz
-        k_msleep(10);
     }
 
     return 0;

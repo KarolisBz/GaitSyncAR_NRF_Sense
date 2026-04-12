@@ -18,4 +18,19 @@ int ble_handler_init(void);
  */
 int ble_handler_send(const uint8_t *data, uint16_t len);
 
+/**
+ * @brief Sends a step event to the connected Unity app via NUS.
+ */
+void send_step_event(void);
+
+/**
+ * @brief Sends a battery level event to the connected Unity app via NUS.
+ * @param battery_level Battery level as a percentage (0-100).
+ */
+void send_battery_event(uint8_t battery_level);
+
+/// @brief Sends a synchronization acknowledgment event to the connected Unity app via NUS.
+/// @param baseline_time The global sync baseline time in milliseconds to include in the event.
+void send_sync_ack_event(uint32_t baseline_time);
+
 #endif /* BLE_HANDLER_H */

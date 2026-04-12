@@ -76,3 +76,7 @@
 	pinctrl-1 = <&pwm0_sleep>;
 	pinctrl-names = "default", "sleep";
 };
+
+&timer1 {
+    status = "okay";
+};
