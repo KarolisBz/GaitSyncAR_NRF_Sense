@@ -84,7 +84,7 @@ int main(void) {
         k_sem_take(&main_loop_sem, K_FOREVER);
 
         if (is_hardware_synced && !sync_ack_sent) {
-
+            global_sync_baseline_ms = k_uptime_get_32();
             send_sync_ack_event(global_sync_baseline_ms);
             sync_ack_sent = true; 
             printk("HARDWARE SYNC COMPLETE at baseline %u ms\n", global_sync_baseline_ms);

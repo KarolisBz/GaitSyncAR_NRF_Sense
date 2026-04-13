@@ -56,8 +56,6 @@ struct __attribute__((packed)) SyncAckData {
 // ---------------------------------------------------------------------- //
 
 void send_step_event() {
-    if (!is_hardware_synced) return;
-
     // Calculate time elapsed since the silicon-level sync occurred
     uint32_t relativeTimestamp = k_uptime_get_32() - global_sync_baseline_ms;
 
@@ -66,7 +64,6 @@ void send_step_event() {
 }
 
 void send_battery_event(uint8_t battery_level) {
-    if (!is_hardware_synced) return;
     struct BatteryData myData = BATTERY_EVENT_INIT(battery_level);
     ble_handler_send((uint8_t *)&myData, sizeof(myData));
 }
