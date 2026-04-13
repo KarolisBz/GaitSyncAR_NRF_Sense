@@ -12,8 +12,6 @@
 #include "clock_sync.h"
 
 // Fields
-bool sync_ack_sent = false;
-
 // Synchronization Semaphore
 K_SEM_DEFINE(main_loop_sem, 0, 1);
 struct k_timer metronome_timer;
@@ -82,9 +80,8 @@ int main(void) {
         // The CPU sleeps, background tasks (like BLE) can still run and will preempt this when needed
         // This prevent time drifts that can occur with k_sleep() and ensures our 100Hz loop runs as accurately as possible
         k_sem_take(&main_loop_sem, K_FOREVER);
-
+        
         if (is_hardware_synced && !sync_ack_sent) {
-            global_sync_baseline_ms = k_uptime_get_32();
             send_sync_ack_event(global_sync_baseline_ms);
             sync_ack_sent = true; 
             printk("HARDWARE SYNC COMPLETE at baseline %u ms\n", global_sync_baseline_ms);

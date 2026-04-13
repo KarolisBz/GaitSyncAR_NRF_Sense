@@ -19,18 +19,14 @@ void clock_sync_init(void);
 void request_sync_timeslot(void);
 
 /**
- * @brief Hardware-captured timestamp of the last sync event.
- * * On the Secondary device, this value is updated via PPI 
- * the exact microsecond the radio pulse is detected.
- */
-extern volatile uint32_t captured_hardware_time_us;
-
-/**
  * @brief Flag indicating if a valid hardware sync has occurred.
  */
 extern volatile bool is_hardware_synced;
 
 // This is the global baseline timestamp that all step events will be relative to after sync.
 extern volatile uint32_t global_sync_baseline_ms;
+
+// This flag ensures we only send one sync acknowledgment per sync event, preventing duplicates.
+extern volatile bool sync_ack_sent;
 
 #endif // CLOCK_SYNC_H

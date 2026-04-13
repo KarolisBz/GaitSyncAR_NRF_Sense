@@ -9,7 +9,7 @@
 #include "device_role.h"
 
 // --- CONFIGURATION ---
-#define TIMESLOT_LENGTH_US 55000   
+#define TIMESLOT_LENGTH_US 65000   
 #define CUSTOM_SYNC_FREQ 80
 
 // --- GLOBALS ---
@@ -20,6 +20,7 @@ volatile uint32_t captured_hardware_time_us = 0;
 volatile bool is_hardware_synced = false;
 volatile uint32_t global_sync_baseline_ms = 0;
 volatile bool baseline_update_pending = false;
+volatile bool sync_ack_sent = false;
 
 // --- SHARED RADIO CONFIG ---
 static void configure_radio_hardware(void) {
@@ -40,6 +41,10 @@ static void configure_radio_hardware(void) {
     NRF_RADIO->PCNF1 = (4UL << RADIO_PCNF1_MAXLEN_Pos)  | 
                        (4UL << RADIO_PCNF1_STATLEN_Pos) | 
                        (4UL << RADIO_PCNF1_BALEN_Pos);
+
+    nrf_radio_crc_configure(NRF_RADIO, RADIO_CRCCNF_LEN_Two, NRF_RADIO_CRC_ADDR_INCLUDE, 0x11021);
+    // Forcing CRC starting seed to be identical on both devices
+    nrf_radio_crcinit_set(NRF_RADIO, 0xFFFF);
 }
 
 // --- THE PRIMARY CALLBACK ---
@@ -52,6 +57,7 @@ static mpsl_timeslot_signal_return_param_t* primary_timeslot_callback(
     if (signal_type == MPSL_TIMESLOT_SIGNAL_START) {
         
         // Safe Clock Start
+        nrf_clock_event_clear(NRF_CLOCK, NRF_CLOCK_EVENT_HFCLKSTARTED);
         nrf_clock_task_trigger(NRF_CLOCK, NRF_CLOCK_TASK_HFCLKSTART);
         uint32_t fail_safe = 10000;
         while (!nrf_clock_event_check(NRF_CLOCK, NRF_CLOCK_EVENT_HFCLKSTARTED) && --fail_safe);
@@ -62,8 +68,8 @@ static mpsl_timeslot_signal_return_param_t* primary_timeslot_callback(
 
         global_sync_baseline_ms = k_uptime_get_32();
 
-        // BURST MODE: Fire the packet 50 times safely
-        for (int i = 0; i < 50; i++) {
+        // BURST MODE: Fire the packet 200 times safely
+        for (int i = 0; i < 200; i++) {
             nrf_radio_packetptr_set(NRF_RADIO, sync_packet);
             
             // Wait for TX to be ready
@@ -117,8 +123,10 @@ static mpsl_timeslot_signal_return_param_t* secondary_timeslot_callback(
     return_param.callback_action = MPSL_TIMESLOT_SIGNAL_ACTION_NONE;
 
     if (signal_type == MPSL_TIMESLOT_SIGNAL_START) {
+        uint32_t timeslot_start_ms = k_uptime_get_32();
         
         // Safe Clock Start
+        nrf_clock_event_clear(NRF_CLOCK, NRF_CLOCK_EVENT_HFCLKSTARTED);
         nrf_clock_task_trigger(NRF_CLOCK, NRF_CLOCK_TASK_HFCLKSTART);
         uint32_t fail_safe = 10000;
         while (!nrf_clock_event_check(NRF_CLOCK, NRF_CLOCK_EVENT_HFCLKSTARTED) && --fail_safe);
@@ -128,6 +136,7 @@ static mpsl_timeslot_signal_return_param_t* secondary_timeslot_callback(
         nrf_timer_mode_set(NRF_TIMER1, NRF_TIMER_MODE_TIMER);
         nrf_timer_bit_width_set(NRF_TIMER1, NRF_TIMER_BIT_WIDTH_32);
         nrf_timer_prescaler_set(NRF_TIMER1, NRF_TIMER_FREQ_1MHz);
+        nrf_timer_task_trigger(NRF_TIMER1, NRF_TIMER_TASK_CLEAR);
         nrf_timer_task_trigger(NRF_TIMER1, NRF_TIMER_TASK_START);
 
         // Setup PPI
@@ -150,7 +159,7 @@ static mpsl_timeslot_signal_return_param_t* secondary_timeslot_callback(
         nrf_radio_event_clear(NRF_RADIO, NRF_RADIO_EVENT_END);
         nrf_radio_task_trigger(NRF_RADIO, NRF_RADIO_TASK_START);
 
-        // EXTENDED TIMEOUT LOOP (50ms Window)
+        // TIMEOUT LOOP (50ms Window)
        bool packet_received = false;
 
         while (1) {
@@ -158,20 +167,29 @@ static mpsl_timeslot_signal_return_param_t* secondary_timeslot_callback(
             uint32_t current_time_us = nrf_timer_cc_get(NRF_TIMER1, NRF_TIMER_CC_CHANNEL1);
 
             if (current_time_us >= 50000) { 
-                // 50ms absolute timeout reached. Bail out safely before the 55ms MPSL limit
+                // 50ms absolute timeout reached. Bail out safely before the 65ms MPSL limit
                 break; 
             }
 
             if (nrf_radio_event_check(NRF_RADIO, NRF_RADIO_EVENT_END)) {
-                baseline_update_pending = true;
-                packet_received = true;
-                break;
+                if (nrf_radio_event_check(NRF_RADIO, NRF_RADIO_EVENT_CRCOK)) {
+                    packet_received = true;
+                    break;
+                } else {
+                    // Noise, false trigger, or partial packet. Clear and go back to listening safely.
+                    nrf_radio_event_clear(NRF_RADIO, NRF_RADIO_EVENT_END);
+                    nrf_radio_event_clear(NRF_RADIO, NRF_RADIO_EVENT_CRCOK);
+                    nrf_radio_event_clear(NRF_RADIO, NRF_RADIO_EVENT_CRCERROR);
+                    nrf_radio_event_clear(NRF_RADIO, NRF_RADIO_EVENT_READY);
+                    nrf_radio_task_trigger(NRF_RADIO, NRF_RADIO_TASK_START);
+                }
             }
         }
 
         // 6. Process Result
         if (packet_received) {
             captured_hardware_time_us = nrf_timer_cc_get(NRF_TIMER1, NRF_TIMER_CC_CHANNEL0);
+            global_sync_baseline_ms = timeslot_start_ms + (captured_hardware_time_us / 1000);
             is_hardware_synced = true;
         }
 
@@ -200,8 +218,8 @@ cleanup:
 // --- PUBLIC API ---
 
 void clock_sync_init(void) {
-    int32_t err; 
-    
+    int32_t err;
+
     if (device_role_is_primary()) {
         err = mpsl_timeslot_session_open(primary_timeslot_callback, &m_session_id);
         printk("Timeslot Session Opened: PRIMARY\n");
@@ -217,6 +235,11 @@ void clock_sync_init(void) {
 
 void request_sync_timeslot(void) {
     static mpsl_timeslot_request_t request;
+    is_hardware_synced = false; 
+    sync_ack_sent = false; 
+    baseline_update_pending = false;
+    captured_hardware_time_us = 0;
+    global_sync_baseline_ms = 0;
     
     request.request_type = MPSL_TIMESLOT_REQ_TYPE_EARLIEST;
     request.params.earliest.hfclk = MPSL_TIMESLOT_HFCLK_CFG_NO_GUARANTEE;
