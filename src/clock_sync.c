@@ -11,16 +11,25 @@
 // --- CONFIGURATION ---
 #define TIMESLOT_LENGTH_US 65000   
 #define CUSTOM_SYNC_FREQ 80
+// Known delay of one TX loop (TXEN + Airtime + DISABLE + Busy Wait)
+// At 1 Mbps, 1 bit takes exactly 1 microsecond.
+// TX Ramp-up: 130 µs
+// Airtime (120 bits): 120 µs
+// TX Ramp-down: 6 µs
+// Artificial Wait: 20 µs
+#define BURST_LOOP_DELAY_US 276
 
 // --- GLOBALS ---
 static mpsl_timeslot_session_id_t m_session_id;
-static uint8_t sync_packet[4] = {0xAA, 0xBB, 0xCC, 0xDD};
+// Byte 0 = Index, Bytes 1-4 = Timestamp, Bytes 5-7 = Pad
+static uint8_t sync_packet[8] = {0x00, 0x00, 0x00, 0x00, 0x00, 0xAA, 0xBB, 0xCC};
 
-volatile uint32_t captured_hardware_time_us = 0;
+volatile uint64_t captured_hardware_time_us = 0;
 volatile bool is_hardware_synced = false;
-volatile uint32_t global_sync_baseline_ms = 0;
+volatile uint64_t global_sync_baseline_us = 0;
 volatile bool baseline_update_pending = false;
 volatile bool sync_ack_sent = false;
+volatile uint64_t local_sync_anchor_us = 0;
 
 // --- SHARED RADIO CONFIG ---
 static void configure_radio_hardware(void) {
@@ -34,12 +43,12 @@ static void configure_radio_hardware(void) {
     nrf_radio_prefix0_set(NRF_RADIO, 0xC0);
     nrf_radio_base0_set(NRF_RADIO, 0x01234567);
 
-    // Wipe out BLE settings and force a raw 4-byte packet ---
+    // Wipe out BLE settings and force a raw 8-byte packet ---
     NRF_RADIO->PCNF0 = 0; // Disable S0, Length, and S1 fields
     
-    // MAXLEN = 4, STATLEN = 4, Base Address Length = 4
-    NRF_RADIO->PCNF1 = (4UL << RADIO_PCNF1_MAXLEN_Pos)  | 
-                       (4UL << RADIO_PCNF1_STATLEN_Pos) | 
+    // MAXLEN = 8, STATLEN = 8, Base Address Length = 4
+    NRF_RADIO->PCNF1 = (8UL << RADIO_PCNF1_MAXLEN_Pos)  | 
+                       (8UL << RADIO_PCNF1_STATLEN_Pos) | 
                        (4UL << RADIO_PCNF1_BALEN_Pos);
 
     nrf_radio_crc_configure(NRF_RADIO, RADIO_CRCCNF_LEN_Two, NRF_RADIO_CRC_ADDR_INCLUDE, 0x11021);
@@ -66,10 +75,19 @@ static mpsl_timeslot_signal_return_param_t* primary_timeslot_callback(
         configure_radio_hardware();
         nrf_radio_txpower_set(NRF_RADIO, NRF_RADIO_TXPOWER_0DBM);
 
-        global_sync_baseline_ms = k_uptime_get_32();
+        // Capture time in microseconds, storing in packet for the secondary to read. This is moment that defines our sync point.
+        // Driven by the 64MHz/16MHz system clock (True microsecond resolution)
+        uint32_t current_cycles = k_cycle_get_32();
+        uint64_t primary_start_us = k_cyc_to_us_floor64(current_cycles);
+        memcpy(&sync_packet[1], &primary_start_us, sizeof(primary_start_us));
 
         // BURST MODE: Fire the packet 200 times safely
         for (int i = 0; i < 200; i++) {
+            
+            // Injecting the current loop index into the very first byte of the payload
+            // we can use this to calculate the actual synced moment on the secondary and compensate for any consistent delays in our processing or the radio's state changes
+            sync_packet[0] = (uint8_t)i;
+
             nrf_radio_packetptr_set(NRF_RADIO, sync_packet);
             
             // Wait for TX to be ready
@@ -98,6 +116,9 @@ static mpsl_timeslot_signal_return_param_t* primary_timeslot_callback(
             k_busy_wait(20);
         }
 cleanup:
+        // Setting baseline
+        global_sync_baseline_us = primary_start_us;
+        local_sync_anchor_us = primary_start_us;
         // Force the radio to turn off and WAIT for it
         nrf_radio_event_clear(NRF_RADIO, NRF_RADIO_EVENT_DISABLED);
         nrf_radio_task_trigger(NRF_RADIO, NRF_RADIO_TASK_DISABLE);
@@ -109,6 +130,7 @@ cleanup:
         nrf_radio_event_clear(NRF_RADIO, NRF_RADIO_EVENT_ADDRESS);
         nrf_radio_event_clear(NRF_RADIO, NRF_RADIO_EVENT_END);
         nrf_radio_event_clear(NRF_RADIO, NRF_RADIO_EVENT_DISABLED);
+        printk("global_sync_baseline_us = %u\n", global_sync_baseline_us);
 
         return_param.callback_action = MPSL_TIMESLOT_SIGNAL_ACTION_END;
     }
@@ -123,8 +145,8 @@ static mpsl_timeslot_signal_return_param_t* secondary_timeslot_callback(
     return_param.callback_action = MPSL_TIMESLOT_SIGNAL_ACTION_NONE;
 
     if (signal_type == MPSL_TIMESLOT_SIGNAL_START) {
-        uint32_t timeslot_start_ms = k_uptime_get_32();
-        
+        uint64_t timeslot_start_us = k_cyc_to_us_floor64(k_cycle_get_32());
+
         // Safe Clock Start
         nrf_clock_event_clear(NRF_CLOCK, NRF_CLOCK_EVENT_HFCLKSTARTED);
         nrf_clock_task_trigger(NRF_CLOCK, NRF_CLOCK_TASK_HFCLKSTART);
@@ -164,7 +186,7 @@ static mpsl_timeslot_signal_return_param_t* secondary_timeslot_callback(
 
         while (1) {
             nrf_timer_task_trigger(NRF_TIMER1, NRF_TIMER_TASK_CAPTURE1);
-            uint32_t current_time_us = nrf_timer_cc_get(NRF_TIMER1, NRF_TIMER_CC_CHANNEL1);
+            uint64_t current_time_us = nrf_timer_cc_get(NRF_TIMER1, NRF_TIMER_CC_CHANNEL1);
 
             if (current_time_us >= 50000) { 
                 // 50ms absolute timeout reached. Bail out safely before the 65ms MPSL limit
@@ -186,10 +208,22 @@ static mpsl_timeslot_signal_return_param_t* secondary_timeslot_callback(
             }
         }
 
-        // 6. Process Result
+        // Process Result
         if (packet_received) {
             captured_hardware_time_us = nrf_timer_cc_get(NRF_TIMER1, NRF_TIMER_CC_CHANNEL0);
-            global_sync_baseline_ms = timeslot_start_ms + (captured_hardware_time_us / 1000);
+
+            // Extracting the metadata from the payload
+            uint8_t packet_index = sync_packet[0];
+            uint64_t primary_timestamp_us;
+            memcpy(&primary_timestamp_us, &sync_packet[1], sizeof(primary_timestamp_us));
+
+            // Calculating the exact moment the Primary sent (THIS) specific packet
+            uint64_t primary_packet_tx_time = primary_timestamp_us + (packet_index * BURST_LOOP_DELAY_US);
+
+            // Establishing global baseline using the Primary's absolute time.
+            // This maps the Secondary's "Timer Zero" directly to the Primary's global clock.
+            global_sync_baseline_us = primary_packet_tx_time - captured_hardware_time_us;
+            
             is_hardware_synced = true;
         }
 
@@ -239,7 +273,7 @@ void request_sync_timeslot(void) {
     sync_ack_sent = false; 
     baseline_update_pending = false;
     captured_hardware_time_us = 0;
-    global_sync_baseline_ms = 0;
+    global_sync_baseline_us = 0;
     
     request.request_type = MPSL_TIMESLOT_REQ_TYPE_EARLIEST;
     request.params.earliest.hfclk = MPSL_TIMESLOT_HFCLK_CFG_NO_GUARANTEE;

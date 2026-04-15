@@ -20,8 +20,9 @@ int ble_handler_send(const uint8_t *data, uint16_t len);
 
 /**
  * @brief Sends a step event to the connected Unity app via NUS.
+ * @param time_stamp The timestamp for the step event in microseconds.
  */
-void send_step_event(void);
+void send_step_event(uint32_t time_stamp);
 
 /**
  * @brief Sends a battery level event to the connected Unity app via NUS.

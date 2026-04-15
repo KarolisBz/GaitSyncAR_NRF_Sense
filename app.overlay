@@ -77,6 +77,10 @@
 	pinctrl-names = "default", "sleep";
 };
 
+&lsm6ds3tr_c {
+    irq-gpios = <&gpio0 11 GPIO_ACTIVE_HIGH>;
+};
+
 &timer1 {
     status = "okay";
 };

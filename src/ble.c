@@ -42,7 +42,7 @@ struct __attribute__((packed)) BatteryData {
 // --- Step event (Type 1) --- //
 struct __attribute__((packed)) GaitData {
     uint8_t type;       
-    uint32_t timestamp; 
+    uint64_t timestamp; 
 };
 #define GAIT_EVENT_INIT(timestamp_val) { .type = 1, .timestamp = (timestamp_val) }
 
@@ -55,11 +55,8 @@ struct __attribute__((packed)) SyncAckData {
 
 // ---------------------------------------------------------------------- //
 
-void send_step_event() {
-    // Calculate time elapsed since the silicon-level sync occurred
-    uint32_t relativeTimestamp = k_uptime_get_32() - global_sync_baseline_ms;
-
-    struct GaitData myData = GAIT_EVENT_INIT(relativeTimestamp);
+void send_step_event(uint64_t time_stamp) {
+    struct GaitData myData = GAIT_EVENT_INIT(time_stamp);
     ble_handler_send((uint8_t *)&myData, sizeof(myData));
 }
 
@@ -175,10 +172,8 @@ int ble_handler_send(const uint8_t *data, uint16_t len) {
 }
 
 void on_ble_rx_received(const uint8_t *data, uint16_t len) {
-    printk("BLE Data Received! Length: %d, Byte 0: %d\n", len, data[0]);
-
-    if (len > 0 && data[0] == 3) {
-        printk("Unity triggered Sync! Requesting timeslot...\n");
+    if (len == 1 && data[0] == 0x3) {
+        printk("Unity triggered Sync, Requesting timeslot...\n");
         request_sync_timeslot();
     }
 }

@@ -10,12 +10,12 @@
 #include "device_role.h"
 #include "led_pwm.h"
 #include "clock_sync.h"
-
+#include <zephyr/drivers/sensor.h>
 // Fields
 // Synchronization Semaphore
 K_SEM_DEFINE(main_loop_sem, 0, 1);
 struct k_timer metronome_timer;
-
+static const struct device *const imu_dev = DEVICE_DT_GET_ANY(st_lsm6dsl);
 // Metronome ISR
 void metronome_handler(struct k_timer *timer_id) {
     k_sem_give(&main_loop_sem);
@@ -72,6 +72,8 @@ int main(void) {
 
     printk("  -> Starting loop...\n");
 
+    init_imu_interrupts();
+
     // Track the time for slower tasks
     uint64_t last_slow_task_time = k_uptime_get();
 
@@ -82,22 +84,16 @@ int main(void) {
         k_sem_take(&main_loop_sem, K_FOREVER);
         
         if (is_hardware_synced && !sync_ack_sent) {
-            send_sync_ack_event(global_sync_baseline_ms);
+            send_sync_ack_event(global_sync_baseline_us / 1000);
             sync_ack_sent = true; 
-            printk("HARDWARE SYNC COMPLETE at baseline %u ms\n", global_sync_baseline_ms);
+            printk("HARDWARE SYNC COMPLETE at baseline %llu µs\n", global_sync_baseline_us);
         }
 
         // Fetch uptime
         uint64_t now = k_uptime_get();
 
-        // Fast tasks (10ms) 100Hz -------------------------------------------------------------------
-        int32_t mag;
-        bool step_detected = imu_step_update(&mag);
-        // printk("Magnitude: %d\n", mag);
-
-        if (step_detected) {
-           send_step_event();
-        }
+        // unsticking pin
+        sensor_sample_fetch(imu_dev);
 
         // Slow tasks (2000ms) 0.5Hz -------------------------------------------------------------------
         if ((now - last_slow_task_time) >= 2000) {
@@ -105,8 +101,8 @@ int main(void) {
 
             // Read battery voltage and send over BLE //
             uint8_t batt_percentage = battery_monitor_get_percentage();
-            send_battery_event(batt_percentage);
-            printk("Battery Percentage: %u%%\n", batt_percentage);
+            // send_battery_event(batt_percentage);
+            // printk("Battery Percentage: %u%%\n", batt_percentage);
         }
     }
 

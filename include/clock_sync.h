@@ -24,7 +24,10 @@ void request_sync_timeslot(void);
 extern volatile bool is_hardware_synced;
 
 // This is the global baseline timestamp that all step events will be relative to after sync.
-extern volatile uint32_t global_sync_baseline_ms;
+extern volatile uint64_t global_sync_baseline_us;
+
+// This is the captured hardware time at the moment of the tap, used for calculating the global timestamp.
+extern volatile uint64_t local_sync_anchor_us;
 
 // This flag ensures we only send one sync acknowledgment per sync event, preventing duplicates.
 extern volatile bool sync_ack_sent;
