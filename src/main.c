@@ -56,7 +56,6 @@ int main(void) {
         .noise_floor = 650,   // MUST drop below 6.5 m/s^2 to count as swinging in the air
         .cooldown_ms = 350
     };
-    imu_step_init(step_cfg);
 
     if (imu_step_init(step_cfg) != 0) {
         printk("IMU Init Failed!\n");
@@ -102,7 +101,7 @@ int main(void) {
 
             // Read battery voltage and send over BLE //
             uint8_t batt_percentage = battery_monitor_get_percentage();
-            // send_battery_event(batt_percentage);
+            send_battery_event(batt_percentage);
             // printk("Battery Percentage: %u%%\n", batt_percentage);
         }
     }

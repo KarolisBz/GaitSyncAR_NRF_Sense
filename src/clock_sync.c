@@ -11,13 +11,15 @@
 // --- CONFIGURATION ---
 #define TIMESLOT_LENGTH_US 65000   
 #define CUSTOM_SYNC_FREQ 80
-// Known delay of one TX loop (TXEN + Airtime + DISABLE + Busy Wait)
+
 // At 1 Mbps, 1 bit takes exactly 1 microsecond.
-// TX Ramp-up: 130 µs
-// Airtime (120 bits): 120 µs
-// TX Ramp-down: 6 µs
-// Artificial Wait: 20 µs
-#define BURST_LOOP_DELAY_US 276
+// Preamble (8) + Address (40) + Payload (80) + CRC (16) = 144us Airtime
+// 144us Airtime + 6us Disable + 20us Wait + 130us TXEN + ~2us processing = ~302us
+#define BURST_LOOP_DELAY_US 303.5 // + 1.5 us of tuning
+
+// Time from capturing the timestamp to the moment the first packet's ADDRESS physically hits the air.
+// TX Ramp-up (130us) + Preamble (8us) + Address (40us) = 178us
+#define FIRST_PACKET_OFFSET_US 178
 
 // --- GLOBALS ---
 static mpsl_timeslot_session_id_t m_session_id;
@@ -71,6 +73,13 @@ static mpsl_timeslot_signal_return_param_t* primary_timeslot_callback(
         uint32_t fail_safe = 10000;
         while (!nrf_clock_event_check(NRF_CLOCK, NRF_CLOCK_EVENT_HFCLKSTARTED) && --fail_safe);
         if (fail_safe == 0) goto cleanup; 
+
+        // STARTTING TIMER1 ON PRIMARY SO IMU INTERRUPT CAN USE IT
+        nrf_timer_mode_set(NRF_TIMER1, NRF_TIMER_MODE_TIMER);
+        nrf_timer_bit_width_set(NRF_TIMER1, NRF_TIMER_BIT_WIDTH_32);
+        nrf_timer_prescaler_set(NRF_TIMER1, NRF_TIMER_FREQ_1MHz);
+        nrf_timer_task_trigger(NRF_TIMER1, NRF_TIMER_TASK_CLEAR);
+        nrf_timer_task_trigger(NRF_TIMER1, NRF_TIMER_TASK_START);
 
         configure_radio_hardware();
         nrf_radio_txpower_set(NRF_RADIO, NRF_RADIO_TXPOWER_0DBM);
@@ -144,8 +153,6 @@ static mpsl_timeslot_signal_return_param_t* secondary_timeslot_callback(
     return_param.callback_action = MPSL_TIMESLOT_SIGNAL_ACTION_NONE;
 
     if (signal_type == MPSL_TIMESLOT_SIGNAL_START) {
-        uint64_t timeslot_start_us = k_ticks_to_us_floor64(k_uptime_ticks());
-
         // Safe Clock Start
         nrf_clock_event_clear(NRF_CLOCK, NRF_CLOCK_EVENT_HFCLKSTARTED);
         nrf_clock_task_trigger(NRF_CLOCK, NRF_CLOCK_TASK_HFCLKSTART);
@@ -211,16 +218,14 @@ static mpsl_timeslot_signal_return_param_t* secondary_timeslot_callback(
         if (packet_received) {
             captured_hardware_time_us = nrf_timer_cc_get(NRF_TIMER1, NRF_TIMER_CC_CHANNEL0);
 
-            // Extracting the metadata from the payload
             uint8_t packet_index = sync_packet[0];
             uint64_t primary_timestamp_us;
             memcpy(&primary_timestamp_us, &sync_packet[1], sizeof(primary_timestamp_us));
 
-            // Calculating the exact moment the Primary sent (THIS) specific packet
-            uint64_t primary_packet_tx_time = primary_timestamp_us + (packet_index * BURST_LOOP_DELAY_US);
+            // Calculating EXACT global transmission moment utilizing new constraints
+            uint64_t primary_packet_tx_time = primary_timestamp_us + FIRST_PACKET_OFFSET_US + (packet_index * BURST_LOOP_DELAY_US);
 
-            // Establishing global baseline using the Primary's absolute time.
-            // This maps the Secondary's "Timer Zero" directly to the Primary's global clock.
+            // Establishing perfect alignment mapping for Timer1 Zero point
             global_sync_baseline_us = primary_packet_tx_time - captured_hardware_time_us;
             
             is_hardware_synced = true;
@@ -239,9 +244,8 @@ cleanup:
         nrf_radio_event_clear(NRF_RADIO, NRF_RADIO_EVENT_END);
         nrf_radio_event_clear(NRF_RADIO, NRF_RADIO_EVENT_DISABLED);
 
-        // Clean up the Timer and the safe PPI channel
-        nrf_ppi_channel_disable(NRF_PPI, NRF_PPI_CHANNEL19); // <-- Using safe channel!
-        nrf_timer_task_trigger(NRF_TIMER1, NRF_TIMER_TASK_STOP);
+        // Clean PPI channel
+        nrf_ppi_channel_disable(NRF_PPI, NRF_PPI_CHANNEL19);
         
         return_param.callback_action = MPSL_TIMESLOT_SIGNAL_ACTION_END;
     }

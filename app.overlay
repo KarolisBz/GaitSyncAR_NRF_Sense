@@ -84,3 +84,8 @@
 &timer1 {
     status = "okay";
 };
+
+&i2c1 {
+    status = "okay";
+    clock-frequency = <I2C_BITRATE_FAST>; // Sets speed to 400kHz
+};
