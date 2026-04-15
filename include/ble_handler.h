@@ -22,7 +22,7 @@ int ble_handler_send(const uint8_t *data, uint16_t len);
  * @brief Sends a step event to the connected Unity app via NUS.
  * @param time_stamp The timestamp for the step event in microseconds.
  */
-void send_step_event(uint32_t time_stamp);
+void send_step_event(uint64_t time_stamp);
 
 /**
  * @brief Sends a battery level event to the connected Unity app via NUS.
@@ -32,6 +32,6 @@ void send_battery_event(uint8_t battery_level);
 
 /// @brief Sends a synchronization acknowledgment event to the connected Unity app via NUS.
 /// @param baseline_time The global sync baseline time in milliseconds to include in the event.
-void send_sync_ack_event(uint32_t baseline_time);
+void send_sync_ack_event(uint64_t baseline_time);
 
 #endif /* BLE_HANDLER_H */

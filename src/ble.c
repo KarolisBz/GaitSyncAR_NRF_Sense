@@ -49,7 +49,7 @@ struct __attribute__((packed)) GaitData {
 // --- Sync Acknowledgment (Type 4) --- //
 struct __attribute__((packed)) SyncAckData {
     uint8_t type;       
-    uint32_t timestamp; 
+    uint64_t timestamp;
 };
 #define SYNC_ACK_INIT(timestamp_val) { .type = 4, .timestamp = (timestamp_val) }
 
@@ -65,7 +65,7 @@ void send_battery_event(uint8_t battery_level) {
     ble_handler_send((uint8_t *)&myData, sizeof(myData));
 }
 
-void send_sync_ack_event(uint32_t baseline_time) {
+void send_sync_ack_event(uint64_t baseline_time) {
     struct SyncAckData myData = SYNC_ACK_INIT(baseline_time);
     ble_handler_send((uint8_t *)&myData, sizeof(myData));
 }

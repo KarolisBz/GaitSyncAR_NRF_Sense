@@ -13,6 +13,9 @@ static const struct device *const imu_dev = DEVICE_DT_GET_ANY(st_lsm6dsl);
 static imu_step_config_t current_config;
 static uint64_t last_step_time = 0;
 static bool is_stepping = false;
+#define STEP_THRESHOLD_MAG 2500
+#define STEP_COOLDOWN_US 500000 // 500ms debounce in microseconds
+extern struct k_msgq step_msgq;
 
 int imu_step_init(imu_step_config_t config) {
     // Checking if the IMU device is ready before proceeding
@@ -94,9 +97,6 @@ bool imu_step_update(int32_t *out_magnitude) {
 // --- THE INTERRUPT HANDLER ---
 // This function sits entirely dormant. The CPU uses 0% power on it.
 // The instant the IMU feels a shock, the physical wire goes HIGH, and the CPU jumps here.
-static uint32_t last_tap_time_us = 0; 
-#define TAP_THRESHOLD_MAG 2500
-#define TAP_COOLDOWN_US 500000 // 500ms debounce in microseconds
 
 // --- THE DATA_READY INTERRUPT HANDLER ---
 static void imu_data_ready_handler(const struct device *dev, const struct sensor_trigger *trig)
@@ -111,26 +111,26 @@ static void imu_data_ready_handler(const struct device *dev, const struct sensor
     double az = sensor_value_to_double(&accel[2]);
 
     // fetching current time
-    uint32_t current_local_time_us = k_cyc_to_us_floor32(k_cycle_get_32());
+    uint64_t current_local_time_us = k_cyc_to_us_floor32(k_cycle_get_32());
 
     // Calculate magnitude
     double magnitude = sqrt((ax * ax) + (ay * ay) + (az * az));
     int32_t scaled_mag = (int32_t)(magnitude * 100);
 
     // Check if the desk strike happened
-    if (scaled_mag > TAP_THRESHOLD_MAG) {
+    if (scaled_mag > STEP_THRESHOLD_MAG) {
 
         // Debounce
-        if ((current_local_time_us - last_tap_time_us) > TAP_COOLDOWN_US) {
-            last_tap_time_us = current_local_time_us;
-            uint32_t time_elapsed_since_sync_us = current_local_time_us - local_sync_anchor_us;
+        if ((current_local_time_us - last_step_time) > STEP_COOLDOWN_US) {
+            last_step_time = current_local_time_us;
+            uint64_t time_elapsed_since_sync_us = current_local_time_us - local_sync_anchor_us;
             
-            uint32_t true_global_tap_time_us = global_sync_baseline_us + time_elapsed_since_sync_us;
+            uint64_t true_global_step_time_us = global_sync_baseline_us + time_elapsed_since_sync_us;
 
-            printk("\n--- DESK STRIKE DETECTED ---\n");
-            printk("Absolute Global Tap Time: %u us\n", true_global_tap_time_us);
+            printk("\n--- STEP DETECTED ---\n");
+            printk("Absolute Global Step Time: %lu us\n", (unsigned long)true_global_step_time_us);
 
-            send_step_event(true_global_tap_time_us);
+            k_msgq_put(&step_msgq, &true_global_step_time_us, K_NO_WAIT);
         }
     }
 }

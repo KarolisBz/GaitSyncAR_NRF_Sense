@@ -11,23 +11,15 @@
 #include "led_pwm.h"
 #include "clock_sync.h"
 #include <zephyr/drivers/sensor.h>
+
 // Fields
-// Synchronization Semaphore
-K_SEM_DEFINE(main_loop_sem, 0, 1);
-struct k_timer metronome_timer;
+struct k_timer main_timer;
 static const struct device *const imu_dev = DEVICE_DT_GET_ANY(st_lsm6dsl);
-// Metronome ISR
-void metronome_handler(struct k_timer *timer_id) {
-    k_sem_give(&main_loop_sem);
-}
+K_MSGQ_DEFINE(step_msgq, sizeof(uint64_t), 10, 4); // Queue holds up to 10 events
 
 int main(void) {
     // Initialize LED module
     led_pwm_init();
-
-    // Starting the metronome at exactly 100Hz (10ms)
-    k_timer_init(&metronome_timer, metronome_handler, NULL);
-    k_timer_start(&metronome_timer, K_MSEC(10), K_MSEC(10));
 
     // Wait for USB console to stabilize //
     k_sleep(K_MSEC(3000));
@@ -77,12 +69,21 @@ int main(void) {
     // Track the time for slower tasks
     uint64_t last_slow_task_time = k_uptime_get();
 
+    // Start metronome
+    k_timer_init(&main_timer, NULL, NULL); // No ISR needed
+    k_timer_start(&main_timer, K_MSEC(10), K_MSEC(10));
+
     while (1) {
-        // Waiting indefinitely until the metronome drops a token
-        // The CPU sleeps, background tasks (like BLE) can still run and will preempt this when needed
-        // This prevent time drifts that can occur with k_sleep() and ensures our 100Hz loop runs as accurately as possible
-        k_sem_take(&main_loop_sem, K_FOREVER);
-        
+        // This blocks the thread natively until the timer expires
+        k_timer_status_sync(&main_timer);
+
+        // prevents synchronus code running in system background thread
+        // prevents stalling other system interrupts
+        uint64_t pending_step_timestamp;
+        if (k_msgq_get(&step_msgq, &pending_step_timestamp, K_NO_WAIT) == 0) {
+            send_step_event(pending_step_timestamp);
+        }
+
         if (is_hardware_synced && !sync_ack_sent) {
             send_sync_ack_event(global_sync_baseline_us / 1000);
             sync_ack_sent = true; 

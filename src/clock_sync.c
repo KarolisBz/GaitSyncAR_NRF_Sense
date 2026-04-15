@@ -21,8 +21,8 @@
 
 // --- GLOBALS ---
 static mpsl_timeslot_session_id_t m_session_id;
-// Byte 0 = Index, Bytes 1-4 = Timestamp, Bytes 5-7 = Pad
-static uint8_t sync_packet[8] = {0x00, 0x00, 0x00, 0x00, 0x00, 0xAA, 0xBB, 0xCC};
+// Byte 0 = Index, Bytes 1-8 = 64-bit Timestamp, Byte 9 = Pad
+static uint8_t sync_packet[10] = {0x00};
 
 volatile uint64_t captured_hardware_time_us = 0;
 volatile bool is_hardware_synced = false;
@@ -46,9 +46,9 @@ static void configure_radio_hardware(void) {
     // Wipe out BLE settings and force a raw 8-byte packet ---
     NRF_RADIO->PCNF0 = 0; // Disable S0, Length, and S1 fields
     
-    // MAXLEN = 8, STATLEN = 8, Base Address Length = 4
-    NRF_RADIO->PCNF1 = (8UL << RADIO_PCNF1_MAXLEN_Pos)  | 
-                       (8UL << RADIO_PCNF1_STATLEN_Pos) | 
+    // MAXLEN = 10, STATLEN = 10, Base Address Length = 4
+    NRF_RADIO->PCNF1 = (10UL << RADIO_PCNF1_MAXLEN_Pos)  | 
+                       (10UL << RADIO_PCNF1_STATLEN_Pos) | 
                        (4UL << RADIO_PCNF1_BALEN_Pos);
 
     nrf_radio_crc_configure(NRF_RADIO, RADIO_CRCCNF_LEN_Two, NRF_RADIO_CRC_ADDR_INCLUDE, 0x11021);
@@ -77,8 +77,7 @@ static mpsl_timeslot_signal_return_param_t* primary_timeslot_callback(
 
         // Capture time in microseconds, storing in packet for the secondary to read. This is moment that defines our sync point.
         // Driven by the 64MHz/16MHz system clock (True microsecond resolution)
-        uint32_t current_cycles = k_cycle_get_32();
-        uint64_t primary_start_us = k_cyc_to_us_floor64(current_cycles);
+        uint64_t primary_start_us = k_ticks_to_us_floor64(k_uptime_ticks());
         memcpy(&sync_packet[1], &primary_start_us, sizeof(primary_start_us));
 
         // BURST MODE: Fire the packet 200 times safely
@@ -130,7 +129,7 @@ cleanup:
         nrf_radio_event_clear(NRF_RADIO, NRF_RADIO_EVENT_ADDRESS);
         nrf_radio_event_clear(NRF_RADIO, NRF_RADIO_EVENT_END);
         nrf_radio_event_clear(NRF_RADIO, NRF_RADIO_EVENT_DISABLED);
-        printk("global_sync_baseline_us = %u\n", global_sync_baseline_us);
+        printk("global_sync_baseline_us = %lu\n", (unsigned long)global_sync_baseline_us);
 
         return_param.callback_action = MPSL_TIMESLOT_SIGNAL_ACTION_END;
     }
@@ -145,7 +144,7 @@ static mpsl_timeslot_signal_return_param_t* secondary_timeslot_callback(
     return_param.callback_action = MPSL_TIMESLOT_SIGNAL_ACTION_NONE;
 
     if (signal_type == MPSL_TIMESLOT_SIGNAL_START) {
-        uint64_t timeslot_start_us = k_cyc_to_us_floor64(k_cycle_get_32());
+        uint64_t timeslot_start_us = k_ticks_to_us_floor64(k_uptime_ticks());
 
         // Safe Clock Start
         nrf_clock_event_clear(NRF_CLOCK, NRF_CLOCK_EVENT_HFCLKSTARTED);
