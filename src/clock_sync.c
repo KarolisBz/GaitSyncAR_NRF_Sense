@@ -7,6 +7,7 @@
 #include <hal/nrf_timer.h>
 #include <hal/nrf_ppi.h>
 #include "device_role.h"
+#include "app_events.h"
 
 // --- CONFIGURATION ---
 #define TIMESLOT_LENGTH_US 65000   
@@ -15,11 +16,11 @@
 // At 1 Mbps, 1 bit takes exactly 1 microsecond.
 // Preamble (8) + Address (40) + Payload (80) + CRC (16) = 144us Airtime
 // 144us Airtime + 6us Disable + 20us Wait + 130us TXEN + ~2us processing = ~302us
-#define BURST_LOOP_DELAY_US 303.5 // + 1.5 us of tuning
+#define BURST_LOOP_DELAY_US 302.25 // + 1.5 us of tuning
 
 // Time from capturing the timestamp to the moment the first packet's ADDRESS physically hits the air.
 // TX Ramp-up (130us) + Preamble (8us) + Address (40us) = 178us
-#define FIRST_PACKET_OFFSET_US 178
+#define FIRST_PACKET_OFFSET_US -1880.5 // Adjusted after empirical testing to account for processing and radio state change delays
 
 // --- GLOBALS ---
 static mpsl_timeslot_session_id_t m_session_id;
@@ -229,6 +230,11 @@ static mpsl_timeslot_signal_return_param_t* secondary_timeslot_callback(
             global_sync_baseline_us = primary_packet_tx_time - captured_hardware_time_us;
             
             is_hardware_synced = true;
+
+            // Adding sync ack event to message queue
+            app_event_t sync_event;
+            sync_event.type = EVENT_SYNC_COMPLETED;
+            k_msgq_put(&app_msgq, &sync_event, K_NO_WAIT);
         }
 
 cleanup:

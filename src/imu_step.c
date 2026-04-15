@@ -1,4 +1,3 @@
-#include "imu_step.h"
 #include <zephyr/kernel.h>
 #include <zephyr/drivers/sensor.h>
 #include <zephyr/sys/printk.h>
@@ -6,6 +5,8 @@
 #include <hal/nrf_timer.h>
 #include "clock_sync.h"
 #include "ble_handler.h"
+#include "app_events.h"
+#include "imu_step.h"
 
 /* Get the IMU device for the XIAO Sense */
 static const struct device *const imu_dev = DEVICE_DT_GET_ANY(st_lsm6dsl);
@@ -16,7 +17,6 @@ static uint64_t last_step_time = 0;
 static bool is_stepping = false;
 #define STEP_THRESHOLD_MAG 2700
 #define STEP_COOLDOWN_US 500000 // 500ms debounce in microseconds
-extern struct k_msgq step_msgq;
 
 int imu_step_init(imu_step_config_t config) {
     // Checking if the IMU device is ready before proceeding
@@ -102,7 +102,6 @@ bool imu_step_update(int32_t *out_magnitude) {
 // --- THE DATA_READY INTERRUPT HANDLER ---
 static void imu_data_ready_handler(const struct device *dev, const struct sensor_trigger *trig)
 {
-    nrf_timer_task_trigger(NRF_TIMER1, NRF_TIMER_TASK_CAPTURE3);
     uint32_t hardware_now_us = nrf_timer_cc_get(NRF_TIMER1, NRF_TIMER_CC_CHANNEL3);
     uint64_t current_local_time_us = k_ticks_to_us_floor64(k_uptime_ticks());
 
@@ -127,7 +126,11 @@ static void imu_data_ready_handler(const struct device *dev, const struct sensor
             last_step_time = current_local_time_us;
             uint64_t true_global_step_time_us = global_sync_baseline_us + hardware_now_us;
 
-            k_msgq_put(&step_msgq, &true_global_step_time_us, K_NO_WAIT);
+            // adding step event to event queue
+            app_event_t step_event;
+            step_event.type = EVENT_STEP_DETECTED;
+            step_event.step_timestamp = true_global_step_time_us;
+            k_msgq_put(&app_msgq, &step_event, K_NO_WAIT);
 
             printk("\n--- STEP DETECTED ---\n");
             printk("Absolute Global Step Time: %llu us\n", true_global_step_time_us); 
