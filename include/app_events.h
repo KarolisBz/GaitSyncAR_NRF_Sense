@@ -10,7 +10,8 @@
 // --- EVENT DEFINITIONS ---
 typedef enum {
     EVENT_STEP_DETECTED,
-    EVENT_SYNC_COMPLETED
+    EVENT_SYNC_COMPLETED,
+    EVENT_FLUSH_IMU
 } app_event_type_t;
 
 typedef struct {

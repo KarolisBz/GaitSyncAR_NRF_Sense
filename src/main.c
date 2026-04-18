@@ -30,19 +30,19 @@ void init_ppi_timestamping(void) {
     // 1. Configure the GPIO pin itself
     nrf_gpio_cfg_input(IMU_INTERRUPT_PIN, NRF_GPIO_PIN_PULLDOWN);
 
-    // 2. Configure GPIOTE Channel 0 manually for High Accuracy
+    // 2. Configure GPIOTE Channel 7 manually for High Accuracy
     // We use the direct register access to ensure 'Mode' is set to 'Event' (0x01)
     // and 'Polarity' is set to 'LoToHi' (0x01)
-    NRF_GPIOTE->CONFIG[0] = (GPIOTE_CONFIG_MODE_Event << GPIOTE_CONFIG_MODE_Pos) |
+    NRF_GPIOTE->CONFIG[7] = (GPIOTE_CONFIG_MODE_Event << GPIOTE_CONFIG_MODE_Pos) |
                             (IMU_INTERRUPT_PIN << GPIOTE_CONFIG_PSEL_Pos) |
                             (GPIOTE_CONFIG_POLARITY_LoToHi << GPIOTE_CONFIG_POLARITY_Pos);
 
     // 3. Wire the PPI Channel 0
-    // Task: Capture Timer 1 into CC[3] when GPIOTE Event 0 fires
+    // Task: Capture Timer 1 into CC[3] when GPIOTE Event 7 fires
     nrf_ppi_channel_endpoint_setup(
         NRF_PPI,
         NRF_PPI_CHANNEL0,
-        (uint32_t)&NRF_GPIOTE->EVENTS_IN[0],
+        (uint32_t)&NRF_GPIOTE->EVENTS_IN[7],
         nrf_timer_task_address_get(NRF_TIMER1, NRF_TIMER_TASK_CAPTURE3)
     );
 
@@ -53,8 +53,23 @@ void init_ppi_timestamping(void) {
 }
 
 int main(void) {
+
     // Initialize LED module
     led_pwm_init();
+
+    // configuring imu step detection //
+    imu_step_config_t step_cfg = {
+        .threshold = 1600,    // MUST spike above 16 m/s^2 to count as a landing
+        .noise_floor = 650,   // MUST drop below 6.5 m/s^2 to count as swinging in the air
+        .cooldown_ms = 350
+    };
+
+    if (imu_step_init(step_cfg) != 0) {
+        printk("IMU Init Failed!\n");
+    }
+
+    // flushing stale data before boot up
+    sensor_sample_fetch(imu_dev);
 
     // Wait for USB console to stabilize //
     k_sleep(K_MSEC(3000));
@@ -67,6 +82,7 @@ int main(void) {
     if (ble_handler_init() != 0) {
         printk("FATAL: Failed to start BLE!\n");
     }
+    k_sleep(K_MSEC(50));
 
     // Initialize NFC //
     int nfc_err = nfc_handler_init();
@@ -85,22 +101,8 @@ int main(void) {
     // Initialize Clock Synchronization //
     clock_sync_init();
 
-    // configuring imu step detection //
-    imu_step_config_t step_cfg = {
-        .threshold = 1600,    // MUST spike above 16 m/s^2 to count as a landing
-        .noise_floor = 650,   // MUST drop below 6.5 m/s^2 to count as swinging in the air
-        .cooldown_ms = 350
-    };
-
-    if (imu_step_init(step_cfg) != 0) {
-        printk("IMU Init Failed!\n");
-    }
-
     // Initialize hardware timestamping of the IMU interrupt
     init_ppi_timestamping();
-
-    // Initialize IMU interrupts for step detection
-    init_imu_interrupts();
 
     // Starting event driven main loop
     printk("--- Starting Event-Driven System ---\n");
@@ -108,8 +110,8 @@ int main(void) {
     uint64_t last_slow_task_time = k_uptime_get();
 
     while (1) {
-        // Sleep for 1ms. 
-        int msg_status = k_msgq_get(&app_msgq, &pending_event, K_MSEC(1));
+        // Sleep for 500ms. 
+        int msg_status = k_msgq_get(&app_msgq, &pending_event, K_MSEC(500));
 
         // ROUTING EVENT IMMEDIATELY
         if (msg_status == 0) {
@@ -117,23 +119,22 @@ int main(void) {
             if (pending_event.type == EVENT_STEP_DETECTED) {
                 // Send step to Unity
                 send_step_event(pending_event.step_timestamp);
-                //printk("Sent Step to Unity: %llu us\n", pending_event.step_timestamp);
+                printk("Sent Step to Unity: %llu us\n", pending_event.step_timestamp);
                 
             } else if (pending_event.type == EVENT_SYNC_COMPLETED) {
+                sensor_sample_fetch(imu_dev);
                 extern volatile uint64_t global_sync_baseline_us; 
                 
                 // sending acknowledgment back to Unity that sync is complete, along with the baseline timestamp for reference
-                send_sync_ack_event(global_sync_baseline_us); 
-                //printk("HARDWARE SYNC COMPLETE at baseline %llu us\n", global_sync_baseline_us);
+                send_sync_ack_event(global_sync_baseline_us);
+
+                printk("HARDWARE SYNC COMPLETE at baseline %llu us\n", global_sync_baseline_us);
+            } else if (pending_event.type == EVENT_FLUSH_IMU) {
+                // Handle IMU flush event
+                // Primary node blackout ended. Flush the IMU to un-stick the pin.
+                sensor_sample_fetch(imu_dev);
             }
         }
-        else {
-            // If 1ms pass with no taps, the CPU wakes up and runs this block.
-            // If the IMU pin is stuck HIGH, this fetch clears the hardware register,
-            // dropping the pin to LOW so interrupt is fixed
-            sensor_sample_fetch(imu_dev);
-        }
-
 
         // --- BACKGROUND TASKS ---
         // 2 seconds

@@ -16,11 +16,11 @@
 // At 1 Mbps, 1 bit takes exactly 1 microsecond.
 // Preamble (8) + Address (40) + Payload (80) + CRC (16) = 144us Airtime
 // 144us Airtime + 6us Disable + 20us Wait + 130us TXEN + ~2us processing = ~302us
-#define BURST_LOOP_DELAY_US 302.25 // + 1.5 us of tuning
+#define BURST_LOOP_DELAY_US 302
 
 // Time from capturing the timestamp to the moment the first packet's ADDRESS physically hits the air.
 // TX Ramp-up (130us) + Preamble (8us) + Address (40us) = 178us
-#define FIRST_PACKET_OFFSET_US -1880.5 // Adjusted after empirical testing to account for processing and radio state change delays
+#define FIRST_PACKET_OFFSET_US -1487 // Adjusted after empirical testing to account for processing and radio state change delays
 
 // --- GLOBALS ---
 static mpsl_timeslot_session_id_t m_session_id;
@@ -90,8 +90,8 @@ static mpsl_timeslot_signal_return_param_t* primary_timeslot_callback(
         uint64_t primary_start_us = k_ticks_to_us_floor64(k_uptime_ticks());
         memcpy(&sync_packet[1], &primary_start_us, sizeof(primary_start_us));
 
-        // BURST MODE: Fire the packet 200 times safely
-        for (int i = 0; i < 200; i++) {
+        // BURST MODE: Fire the packet 150 times safely
+        for (int i = 0; i < 150; i++) {
             
             // Injecting the current loop index into the very first byte of the payload
             // we can use this to calculate the actual synced moment on the secondary and compensate for any consistent delays in our processing or the radio's state changes
@@ -139,7 +139,11 @@ cleanup:
         nrf_radio_event_clear(NRF_RADIO, NRF_RADIO_EVENT_ADDRESS);
         nrf_radio_event_clear(NRF_RADIO, NRF_RADIO_EVENT_END);
         nrf_radio_event_clear(NRF_RADIO, NRF_RADIO_EVENT_DISABLED);
-        printk("global_sync_baseline_us = %lu\n", (unsigned long)global_sync_baseline_us);
+
+        // radio blackout over, unstick IMU if it was stuck on the radio interrupt
+        app_event_t flush_event;
+        flush_event.type = EVENT_FLUSH_IMU;
+        k_msgq_put(&app_msgq, &flush_event, K_NO_WAIT);
 
         return_param.callback_action = MPSL_TIMESLOT_SIGNAL_ACTION_END;
     }
