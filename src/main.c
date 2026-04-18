@@ -122,8 +122,7 @@ int main(void) {
                 printk("Sent Step to Unity: %llu us\n", pending_event.step_timestamp);
                 
             } else if (pending_event.type == EVENT_SYNC_COMPLETED) {
-                sensor_sample_fetch(imu_dev);
-                extern volatile uint64_t global_sync_baseline_us; 
+                imu_step_reset_trigger();
                 
                 // sending acknowledgment back to Unity that sync is complete, along with the baseline timestamp for reference
                 send_sync_ack_event(global_sync_baseline_us);

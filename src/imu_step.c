@@ -134,7 +134,7 @@ static void init_imu_interrupts(void) {
     // ----------------------------------------------------
 
     struct sensor_value pulse_cfg;
-    pulse_cfg.val1 = 1; 
+    pulse_cfg.val1 = 0; 
     sensor_attr_set(imu_dev, SENSOR_CHAN_ACCEL_XYZ, SENSOR_ATTR_CONFIGURATION, &pulse_cfg);
 
     // Set the trigger to DATA_READY
@@ -149,4 +149,27 @@ static void init_imu_interrupts(void) {
     }
     
     printk("IMU DATA_READY hardware interrupt armed.\n");
+}
+
+void imu_step_reset_trigger(void) {
+    if (!device_is_ready(imu_dev)) {
+        return;
+    }
+
+    // Let the radio peripheral and I2C bus settle before acting
+    k_msleep(5); 
+
+    struct sensor_trigger data_trigger = {
+        .type = SENSOR_TRIG_DATA_READY,
+        .chan = SENSOR_CHAN_ACCEL_XYZ,
+    };
+
+    // Wiping internal GPIO state and unmasks stuck interrupts
+    sensor_trigger_set(imu_dev, &data_trigger, NULL);
+
+    // Flushing IMU BUS
+    sensor_sample_fetch(imu_dev);
+
+    // Zephyr cleanly attaches the interrupt again
+    sensor_trigger_set(imu_dev, &data_trigger, imu_data_ready_handler);
 }

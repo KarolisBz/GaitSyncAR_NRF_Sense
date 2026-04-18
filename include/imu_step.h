@@ -30,4 +30,10 @@ typedef struct {
  */
 int imu_step_init(imu_step_config_t config);
 
+/**
+ * @brief Safely resets the Zephyr trigger state machine to recover from deadlocks.
+ * Disables the interrupt, flushes the I2C buffer, and re-arms the handler.
+ */
+void imu_step_reset_trigger(void);
+
 #endif // IMU_STEP_H
