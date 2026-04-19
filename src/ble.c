@@ -11,10 +11,12 @@
 #include "clock_sync.h"
 #include <stdbool.h>
 #include <stdint.h>
+#include "app_events.h"
 
 // Fields
 static struct bt_conn *active_conn = NULL;
 static struct k_work_delayable adv_start_work;
+extern struct k_msgq app_msgq;
 
 // foward declations
 void on_ble_rx_received(const uint8_t *data, uint16_t len);
@@ -178,5 +180,15 @@ void on_ble_rx_received(const uint8_t *data, uint16_t len) {
     if (len == 1 && data[0] == 0x3) {
         printk("Unity triggered Sync, Requesting timeslot...\n");
         request_sync_timeslot();
+    }
+    else if (len == 6 && data[0] == 0x5) {
+        app_event_t sync_event;
+        sync_event.type = EVENT_METRONOME_SYNC;
+        sync_event.metronome.play = (data[1] == 1);
+        sync_event.metronome.bpm = data[2];
+        sync_event.metronome.is_next_beat_right = (data[3] == 1);
+        sync_event.metronome.phase_offset = (uint16_t)(data[4] | (data[5] << 8));
+        
+        k_msgq_put(&app_msgq, &sync_event, K_NO_WAIT);
     }
 }

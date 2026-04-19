@@ -11,6 +11,17 @@
 	aliases {
 		pwm-led1 = &my_pwm_led_1;
 		pwm-led2 = &my_pwm_led_2;
+        haptic = &erm_motor;
+	};
+
+    custom_outputs {
+		compatible = "gpio-leds";
+		
+		erm_motor: pin_a0 {
+			/* P0.02 translates to Port 0, Pin 2 */
+			gpios = <&gpio0 2 GPIO_ACTIVE_HIGH>;
+			label = "ERM Haptic Motor";
+		};
 	};
 
 	pwmleds {

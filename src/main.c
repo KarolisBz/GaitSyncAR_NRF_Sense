@@ -16,6 +16,7 @@
 #include <hal/nrf_timer.h>
 #include <hal/nrf_gpiote.h>
 #include <hal/nrf_gpio.h>
+#include "haptic.h"
 
 
 // Fields
@@ -98,6 +99,11 @@ int main(void) {
         printk("Battery Monitor Init Failed: %d\n", err);
     }
 
+    // Initialize Haptic Feedback //
+    if (haptic_init() != 0) {
+        printk("Failed to init haptic module!\n");
+    }
+
     // Initialize Clock Synchronization //
     clock_sync_init();
 
@@ -128,10 +134,19 @@ int main(void) {
                 send_sync_ack_event(global_sync_baseline_us);
 
                 printk("HARDWARE SYNC COMPLETE at baseline %llu us\n", global_sync_baseline_us);
+
             } else if (pending_event.type == EVENT_FLUSH_IMU) {
                 // Handle IMU flush event
                 // Primary node blackout ended. Flush the IMU to un-stick the pin.
                 sensor_sample_fetch(imu_dev);
+
+            } else if (pending_event.type == EVENT_METRONOME_SYNC) {
+                haptic_sync(
+                    pending_event.metronome.play, 
+                    pending_event.metronome.bpm, 
+                    pending_event.metronome.phase_offset,
+                    pending_event.metronome.is_next_beat_right
+                );
             }
         }
 

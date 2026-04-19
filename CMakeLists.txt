@@ -13,5 +13,6 @@ target_sources(app PRIVATE
     src/device_role.c
     src/led_pwm.c
     src/clock_sync.c
+    src/haptic.c
 )
 target_include_directories(app PUBLIC include)
