@@ -13,7 +13,7 @@ RTOS: Zephyr 4.2.99
 Build System: west / CMake / Ninja
 
 ## Build and Flash Instructions
-```west init -m https://github.com/yourusername/your-repo.git --mr main my-workspace
+```west init -m https://github.com/KarolisBz/GaitSyncAR_NRF_Sense.git --mr main my-workspace
 cd my-workspace
 west update```
 
